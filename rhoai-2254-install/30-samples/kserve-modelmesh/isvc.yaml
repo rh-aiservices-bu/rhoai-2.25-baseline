@@ -7,6 +7,27 @@ metadata:
     opendatahub.io/dashboard: "true"
     modelmesh-enabled: "true"
 ---
+# Stub data connection — ModelMesh pods mount this Secret to resolve ISVC storage.key lookups.
+# Credentials are dummies; the migration only needs the ISVC/ServingRuntime pair to exist.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: storage-config
+  namespace: ml-project-c
+  labels:
+    opendatahub.io/dashboard: "true"
+type: Opaque
+stringData:
+  aws-connection-my-storage: |
+    {
+      "type": "s3",
+      "access_key_id": "AKIAEXAMPLE",
+      "secret_access_key": "EXAMPLESECRET",
+      "endpoint_url": "https://s3.us-east-1.amazonaws.com",
+      "default_bucket": "rhoai-migration-test",
+      "region": "us-east-1"
+    }
+---
 # Multi-model ServingRuntime — the spec.multiModel: true marker is what §2.8.7.2 keys off.
 apiVersion: serving.kserve.io/v1alpha1
 kind: ServingRuntime
@@ -36,7 +57,7 @@ spec:
   grpcDataEndpoint: port:8001
   containers:
     - name: mlserver
-      image: seldonio/mlserver:1.3.2
+      image: docker.io/seldonio/mlserver:1.6.1
       env:
         - name: MLSERVER_MODELS_DIR
           value: /models/_mlserver_models/

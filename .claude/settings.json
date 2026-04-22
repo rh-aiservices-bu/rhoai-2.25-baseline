@@ -15,7 +15,8 @@
       "Bash(oc apply *)",
       "Bash(oc delete *)",
       "Bash(awk '/^Events:/,0')",
-      "Bash(awk '/^Status:/,0')"
+      "Bash(awk '/^Status:/,0')",
+      "Bash(oc logs *)"
     ]
   }
 }
