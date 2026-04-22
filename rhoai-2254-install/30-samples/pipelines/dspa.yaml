@@ -30,6 +30,6 @@ spec:
     disableHealthCheck: false
     minio:
       deploy: true
-      image: quay.io/minio/minio@sha256:dbe49e30b98820ee8b6afc4e7c3cf8e4ffb7f4d39c92f3e4a2a7f8a3e2a0b4f0
+      image: quay.io/minio/minio:RELEASE.2024-09-13T20-26-02Z
       pvcSize: 10Gi
       bucket: mlpipeline

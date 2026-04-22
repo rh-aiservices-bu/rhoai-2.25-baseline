@@ -7,7 +7,15 @@
       "Bash(./install.sh)",
       "Bash(tee /tmp/rhoai-install.log)",
       "Read(//private/tmp/**)",
-      "Bash(grep --line-buffered -E \"=== phase|--- [a-z]|done$|ERR:|WARN:|die|timeout|FAIL|Error|denied|NotFound|Forbidden|approving InstallPlan|is Ready|Succeeded|install complete\")"
+      "Bash(grep --line-buffered -E \"=== phase|--- [a-z]|done$|ERR:|WARN:|die|timeout|FAIL|Error|denied|NotFound|Forbidden|approving InstallPlan|is Ready|Succeeded|install complete\")",
+      "Bash(./30-samples/run.sh)",
+      "Bash(tee /tmp/rhoai-samples-rerun.log)",
+      "Bash(grep --line-buffered -E \"--- [a-z]|done$|ERR:|WARN:|die|timeout|FAIL|Error|denied|NotFound|Forbidden|AlreadyExists|skipping|finished with failures\")",
+      "Bash(oc describe *)",
+      "Bash(oc apply *)",
+      "Bash(oc delete *)",
+      "Bash(awk '/^Events:/,0')",
+      "Bash(awk '/^Status:/,0')"
     ]
   }
 }

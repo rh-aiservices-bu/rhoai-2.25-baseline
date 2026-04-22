@@ -14,6 +14,77 @@ metadata:
   labels:
     opendatahub.io/dashboard: "true"
     modelmesh-enabled: "false"
+# ServiceAccounts and PVCs MUST be created before the Notebook CR —
+# otherwise the Notebook controller races ahead and auto-creates an SA,
+# after which `oc apply` sees AlreadyExists when it tries to create ours.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jupyter-2025-1
+  namespace: workbenches-regular
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jupyter-2025-1
+  namespace: workbenches-regular
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: codeserver-2025-1
+  namespace: workbenches-regular
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: codeserver-2025-1
+  namespace: workbenches-regular
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rstudio-latest
+  namespace: workbenches-regular
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rstudio-latest
+  namespace: workbenches-regular
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jupyter-2025-1
+  namespace: workbenches-hwp
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jupyter-2025-1-hwp
+  namespace: workbenches-hwp
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
 ---
 # Jupyter workbench, 2025.1 image (older — migration §2.6 recommends upgrading to 2025.2 first)
 apiVersion: kubeflow.org/v1
@@ -62,23 +133,6 @@ spec:
           persistentVolumeClaim:
             claimName: jupyter-2025-1
 ---
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: jupyter-2025-1
-  namespace: workbenches-regular
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: jupyter-2025-1
-  namespace: workbenches-regular
-spec:
-  accessModes: ["ReadWriteOnce"]
-  resources:
-    requests:
-      storage: 5Gi
----
 # code-server workbench, 2025.1 image (older — migration §2.6 requires 2025.2 before upgrade)
 apiVersion: kubeflow.org/v1
 kind: Notebook
@@ -117,23 +171,6 @@ spec:
         - name: codeserver-2025-1
           persistentVolumeClaim:
             claimName: codeserver-2025-1
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: codeserver-2025-1
-  namespace: workbenches-regular
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: codeserver-2025-1
-  namespace: workbenches-regular
-spec:
-  accessModes: ["ReadWriteOnce"]
-  resources:
-    requests:
-      storage: 5Gi
 ---
 # RStudio workbench, pinned to a specific tag — migration §2.6 requires "latest" before upgrade
 apiVersion: kubeflow.org/v1
@@ -174,23 +211,6 @@ spec:
           persistentVolumeClaim:
             claimName: rstudio-latest
 ---
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: rstudio-latest
-  namespace: workbenches-regular
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: rstudio-latest
-  namespace: workbenches-regular
-spec:
-  accessModes: ["ReadWriteOnce"]
-  resources:
-    requests:
-      storage: 5Gi
----
 # Jupyter workbench in hardware-profile namespace (already on 2025.1 so migration can compare)
 apiVersion: kubeflow.org/v1
 kind: Notebook
@@ -229,20 +249,3 @@ spec:
         - name: jupyter-2025-1-hwp
           persistentVolumeClaim:
             claimName: jupyter-2025-1-hwp
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: jupyter-2025-1
-  namespace: workbenches-hwp
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: jupyter-2025-1-hwp
-  namespace: workbenches-hwp
-spec:
-  accessModes: ["ReadWriteOnce"]
-  resources:
-    requests:
-      storage: 5Gi
