@@ -1,0 +1,30 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: my-model-registry-db-credentials
+  namespace: rhoai-model-registries
+type: Opaque
+stringData:
+  database-name: model_registry
+  database-password: modelregistrypassword
+  database-user: mlmduser
+---
+# ModelRegistry — migration §2.3 verifies registry + db + catalog pods Running pre-upgrade.
+apiVersion: modelregistry.opendatahub.io/v1alpha1
+kind: ModelRegistry
+metadata:
+  name: my-model-registry
+  namespace: rhoai-model-registries
+spec:
+  grpc: {}
+  rest: {}
+  mysql:
+    host: my-model-registry-db
+    port: 3306
+    database: model_registry
+    username: mlmduser
+    passwordSecret:
+      key: database-password
+      name: my-model-registry-db-credentials
+    skipDBCreation: false

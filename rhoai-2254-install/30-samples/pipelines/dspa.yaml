@@ -1,0 +1,35 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dspa-sample
+  labels:
+    opendatahub.io/dashboard: "true"
+    modelmesh-enabled: "false"
+---
+# DataSciencePipelinesApplication using the v1 API (stable in 2.25.4).
+# Migration §2.4 runs check_before_upgrade.sh to detect deprecated v1alpha1 usage and
+# flags the deprecated 'instructLab' field.
+apiVersion: datasciencepipelinesapplications.opendatahub.io/v1
+kind: DataSciencePipelinesApplication
+metadata:
+  name: sample-pipelines
+  namespace: dspa-sample
+spec:
+  dspVersion: v2
+  apiServer:
+    enableSamplePipeline: true
+  database:
+    disableHealthCheck: false
+    mariaDB:
+      deploy: true
+      pipelineDBName: mlpipeline
+      pvcSize: 10Gi
+      username: mlpipeline
+  objectStorage:
+    disableHealthCheck: false
+    minio:
+      deploy: true
+      image: quay.io/minio/minio@sha256:dbe49e30b98820ee8b6afc4e7c3cf8e4ffb7f4d39c92f3e4a2a7f8a3e2a0b4f0
+      pvcSize: 10Gi
+      bucket: mlpipeline

@@ -1,0 +1,26 @@
+---
+# Node Feature Discovery instance — labels nodes with GPU PCI vendor/device info
+# so the GPU Operator's driver daemonset can target them.
+apiVersion: nfd.openshift.io/v1
+kind: NodeFeatureDiscovery
+metadata:
+  name: nfd-instance
+  namespace: openshift-nfd
+spec:
+  operand:
+    imagePullPolicy: IfNotPresent
+    servicePort: 12000
+  workerConfig:
+    configData: |
+      core:
+        sleepInterval: 60s
+      sources:
+        pci:
+          deviceClassWhitelist:
+            - "0200"
+            - "03"
+            - "12"
+          deviceLabelFields:
+            - "vendor"
+  customConfig:
+    configData: ""

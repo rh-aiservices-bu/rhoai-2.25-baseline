@@ -1,0 +1,36 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: llm-project-a
+  labels:
+    opendatahub.io/dashboard: "true"
+    modelmesh-enabled: "false"
+---
+# Pre-migration LLMInferenceService — no authentication configured yet, no RHCL present.
+# Migration §2.8.10.3 will add AuthPolicy after installing Red Hat Connectivity Link.
+# Migration §2.8.10.4 will freeze the template annotations before the 3.3.2 upgrade.
+apiVersion: serving.kserve.io/v1alpha1
+kind: LLMInferenceService
+metadata:
+  name: my-llm-model
+  namespace: llm-project-a
+  labels:
+    opendatahub.io/dashboard: "true"
+spec:
+  model:
+    uri: "hf://ibm-granite/granite-3.0-2b-instruct"
+    name: granite-3.0-2b-instruct
+  replicas: 1
+  template:
+    containers:
+      - name: main
+        resources:
+          requests:
+            cpu: "2"
+            memory: 8Gi
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: 16Gi
+            nvidia.com/gpu: "1"

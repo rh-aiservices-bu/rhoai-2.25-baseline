@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/phayes/projects/llm-d/ocp-setup/**)",
+      "Bash(oc whoami *)",
+      "Bash(oc version *)",
+      "Bash(./install.sh)",
+      "Bash(tee /tmp/rhoai-install.log)",
+      "Read(//private/tmp/**)",
+      "Bash(grep --line-buffered -E \"=== phase|--- [a-z]|done$|ERR:|WARN:|die|timeout|FAIL|Error|denied|NotFound|Forbidden|approving InstallPlan|is Ready|Succeeded|install complete\")"
+    ]
+  }
+}

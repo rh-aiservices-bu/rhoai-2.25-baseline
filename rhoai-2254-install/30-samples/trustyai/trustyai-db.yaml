@@ -1,0 +1,98 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: test-trustyaiservice-db
+  labels:
+    opendatahub.io/dashboard: "true"
+    modelmesh-enabled: "false"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+  namespace: test-trustyaiservice-db
+type: Opaque
+stringData:
+  databaseKind: mariadb
+  databaseUsername: trusty
+  databasePassword: trustypassword
+  databaseService: mariadb
+  databasePort: "3306"
+  databaseName: trustyai_db
+  databaseGeneration: update
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mariadb
+  namespace: test-trustyaiservice-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: mariadb }
+  template:
+    metadata:
+      labels: { app: mariadb }
+    spec:
+      containers:
+        - name: mariadb
+          image: registry.redhat.io/rhel9/mariadb-1011:latest
+          env:
+            - name: MYSQL_USER
+              value: trusty
+            - name: MYSQL_PASSWORD
+              value: trustypassword
+            - name: MYSQL_DATABASE
+              value: trustyai_db
+            - name: MYSQL_ROOT_PASSWORD
+              value: rootpassword
+          ports:
+            - containerPort: 3306
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: mariadb-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mariadb-data
+  namespace: test-trustyaiservice-db
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb
+  namespace: test-trustyaiservice-db
+spec:
+  ports:
+    - port: 3306
+      targetPort: 3306
+  selector:
+    app: mariadb
+---
+# TrustyAI with DATABASE storage — migration §2.5.3 mysqldumps this during pre-upgrade backup.
+apiVersion: trustyai.opendatahub.io/v1alpha1
+kind: TrustyAIService
+metadata:
+  name: trustyai-service
+  namespace: test-trustyaiservice-db
+spec:
+  storage:
+    format: DATABASE
+    databaseConfigurations: db-credentials
+    size: 1Gi
+  data:
+    filename: data.csv
+    format: CSV
+  metrics:
+    schedule: 5s

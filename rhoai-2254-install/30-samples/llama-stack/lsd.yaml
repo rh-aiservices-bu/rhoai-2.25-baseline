@@ -1,0 +1,28 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ldap-user17-rag-225
+  labels:
+    opendatahub.io/dashboard: "true"
+    modelmesh-enabled: "false"
+---
+# LlamaStackDistribution — migration §2.5 warns this is completely wiped on upgrade.
+# Resource owners must export data before migration; this sample exists so that path is exercised.
+apiVersion: llamastack.io/v1alpha1
+kind: LlamaStackDistribution
+metadata:
+  name: lsd-llama-milvus-2323
+  namespace: ldap-user17-rag-225
+spec:
+  replicas: 1
+  server:
+    distribution:
+      name: rh-dev
+    containerSpec:
+      port: 8321
+      env:
+        - name: MILVUS_DB_PATH
+          value: "/opt/app-root/src/milvus.db"
+        - name: FMS_HF_TOKEN
+          value: ""

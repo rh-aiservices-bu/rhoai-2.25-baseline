@@ -1,0 +1,24 @@
+---
+# Pre-migration DSCInitialization:
+#   - serviceMesh.managementState: Managed — operator will create the SMCP in istio-system.
+#     Migration §2.8.9 sets this to Removed.
+#   - trustedCABundle managementState: Managed (operator's default behaviour).
+apiVersion: dscinitialization.opendatahub.io/v1
+kind: DSCInitialization
+metadata:
+  name: default-dsci
+spec:
+  applicationsNamespace: redhat-ods-applications
+  monitoring:
+    managementState: Managed
+    namespace: redhat-ods-monitoring
+    metrics: {}
+  serviceMesh:
+    managementState: Managed
+    controlPlane:
+      name: data-science-smcp
+      namespace: istio-system
+      metricsCollection: Istio
+  trustedCABundle:
+    managementState: Managed
+    customCABundle: ""

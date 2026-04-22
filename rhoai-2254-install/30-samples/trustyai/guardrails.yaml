@@ -1,0 +1,22 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: test-guardrails-builtin-upgrade
+  labels:
+    opendatahub.io/dashboard: "true"
+    modelmesh-enabled: "false"
+---
+# GuardrailsOrchestrator with OTLP exporter config — migration §2.5.4 backs up this config.
+apiVersion: trustyai.opendatahub.io/v1alpha1
+kind: GuardrailsOrchestrator
+metadata:
+  name: guardrails-orchestrator
+  namespace: test-guardrails-builtin-upgrade
+spec:
+  replicas: 1
+  orchestratorConfig: fms-orchestr8-config-nlp
+  otelExporter:
+    otlpEndpoint: "http://otel-collector.test-guardrails-builtin-upgrade.svc.cluster.local:4317"
+    otlpExport: "metrics,traces"
+    protocol: "grpc"

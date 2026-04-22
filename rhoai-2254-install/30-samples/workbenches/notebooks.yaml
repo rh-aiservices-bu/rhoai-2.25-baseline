@@ -1,0 +1,248 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: workbenches-regular
+  labels:
+    opendatahub.io/dashboard: "true"
+    modelmesh-enabled: "false"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: workbenches-hwp
+  labels:
+    opendatahub.io/dashboard: "true"
+    modelmesh-enabled: "false"
+---
+# Jupyter workbench, 2025.1 image (older — migration §2.6 recommends upgrading to 2025.2 first)
+apiVersion: kubeflow.org/v1
+kind: Notebook
+metadata:
+  name: jupyter-2025-1
+  namespace: workbenches-regular
+  labels:
+    app: jupyter-2025-1
+    opendatahub.io/dashboard: "true"
+  annotations:
+    opendatahub.io/image-display-name: "Jupyter | Standard Data Science | CPU | 2025.1"
+    notebooks.opendatahub.io/inject-oauth: "true"
+    notebooks.kubeflow.org/last-activity: ""
+    kubeflow-resource-stopped: "true"
+spec:
+  template:
+    spec:
+      serviceAccountName: jupyter-2025-1
+      containers:
+        - name: jupyter-2025-1
+          image: image-registry.openshift-image-registry.svc:5000/redhat-ods-applications/jupyter-datascience-notebook:2025.1
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          ports:
+            - containerPort: 8888
+              name: notebook-port
+              protocol: TCP
+          env:
+            - name: NOTEBOOK_ARGS
+              value: |-
+                --ServerApp.port=8888
+                --ServerApp.token=''
+                --ServerApp.password=''
+                --ServerApp.base_url=/notebook/workbenches-regular/jupyter-2025-1
+          volumeMounts:
+            - name: jupyter-2025-1
+              mountPath: /opt/app-root/src
+      volumes:
+        - name: jupyter-2025-1
+          persistentVolumeClaim:
+            claimName: jupyter-2025-1
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jupyter-2025-1
+  namespace: workbenches-regular
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jupyter-2025-1
+  namespace: workbenches-regular
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+# code-server workbench, 2025.1 image (older — migration §2.6 requires 2025.2 before upgrade)
+apiVersion: kubeflow.org/v1
+kind: Notebook
+metadata:
+  name: codeserver-2025-1
+  namespace: workbenches-regular
+  labels:
+    app: codeserver-2025-1
+    opendatahub.io/dashboard: "true"
+  annotations:
+    opendatahub.io/image-display-name: "code-server | 2025.1"
+    notebooks.opendatahub.io/inject-oauth: "true"
+    kubeflow-resource-stopped: "true"
+spec:
+  template:
+    spec:
+      serviceAccountName: codeserver-2025-1
+      containers:
+        - name: codeserver-2025-1
+          image: image-registry.openshift-image-registry.svc:5000/redhat-ods-applications/code-server-notebook:2025.1
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          ports:
+            - containerPort: 8888
+              name: notebook-port
+              protocol: TCP
+          volumeMounts:
+            - name: codeserver-2025-1
+              mountPath: /opt/app-root/src
+      volumes:
+        - name: codeserver-2025-1
+          persistentVolumeClaim:
+            claimName: codeserver-2025-1
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: codeserver-2025-1
+  namespace: workbenches-regular
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: codeserver-2025-1
+  namespace: workbenches-regular
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+# RStudio workbench, pinned to a specific tag — migration §2.6 requires "latest" before upgrade
+apiVersion: kubeflow.org/v1
+kind: Notebook
+metadata:
+  name: rstudio-latest
+  namespace: workbenches-regular
+  labels:
+    app: rstudio-latest
+    opendatahub.io/dashboard: "true"
+  annotations:
+    opendatahub.io/image-display-name: "RStudio | 2025.1"
+    notebooks.opendatahub.io/inject-oauth: "true"
+    kubeflow-resource-stopped: "true"
+spec:
+  template:
+    spec:
+      serviceAccountName: rstudio-latest
+      containers:
+        - name: rstudio-latest
+          image: image-registry.openshift-image-registry.svc:5000/redhat-ods-applications/rstudio-notebook:2025.1
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          ports:
+            - containerPort: 8787
+              name: notebook-port
+              protocol: TCP
+          volumeMounts:
+            - name: rstudio-latest
+              mountPath: /opt/app-root/src
+      volumes:
+        - name: rstudio-latest
+          persistentVolumeClaim:
+            claimName: rstudio-latest
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rstudio-latest
+  namespace: workbenches-regular
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rstudio-latest
+  namespace: workbenches-regular
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+# Jupyter workbench in hardware-profile namespace (already on 2025.1 so migration can compare)
+apiVersion: kubeflow.org/v1
+kind: Notebook
+metadata:
+  name: jupyter-2025-1
+  namespace: workbenches-hwp
+  labels:
+    app: jupyter-2025-1
+    opendatahub.io/dashboard: "true"
+  annotations:
+    opendatahub.io/image-display-name: "Jupyter | Standard Data Science | CPU | 2025.1"
+    notebooks.opendatahub.io/inject-oauth: "true"
+    kubeflow-resource-stopped: "true"
+spec:
+  template:
+    spec:
+      serviceAccountName: jupyter-2025-1
+      containers:
+        - name: jupyter-2025-1
+          image: image-registry.openshift-image-registry.svc:5000/redhat-ods-applications/jupyter-datascience-notebook:2025.1
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          ports:
+            - containerPort: 8888
+              name: notebook-port
+              protocol: TCP
+          volumeMounts:
+            - name: jupyter-2025-1-hwp
+              mountPath: /opt/app-root/src
+      volumes:
+        - name: jupyter-2025-1-hwp
+          persistentVolumeClaim:
+            claimName: jupyter-2025-1-hwp
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jupyter-2025-1
+  namespace: workbenches-hwp
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jupyter-2025-1-hwp
+  namespace: workbenches-hwp
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
