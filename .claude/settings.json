@@ -16,7 +16,8 @@
       "Bash(oc delete *)",
       "Bash(awk '/^Events:/,0')",
       "Bash(awk '/^Status:/,0')",
-      "Bash(oc logs *)"
+      "Bash(oc logs *)",
+      "Bash(awk '/workbenches-\\(regular|hwp\\)/ {printf \"%-22s %-25s %s\\\\n\",$1,$2,$4}')"
     ]
   }
 }

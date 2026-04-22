@@ -72,6 +72,40 @@ spec:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
+  name: custom
+  namespace: workbenches-regular
+---
+# Grant the `custom` SA OpenShift's anyuid SCC so the upstream jupyter/scipy-notebook
+# image can run as its baked-in UID 1000 (jovyan). This is the standard workaround
+# RHOAI admins apply for custom images that aren't built for random UIDs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: custom-anyuid
+  namespace: workbenches-regular
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:anyuid
+subjects:
+  - kind: ServiceAccount
+    name: custom
+    namespace: workbenches-regular
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: custom
+  namespace: workbenches-regular
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
   name: jupyter-2025-1
   namespace: workbenches-hwp
 ---
@@ -99,14 +133,13 @@ metadata:
     opendatahub.io/image-display-name: "Jupyter | Standard Data Science | CPU | 2025.1"
     notebooks.opendatahub.io/inject-oauth: "true"
     notebooks.kubeflow.org/last-activity: ""
-    kubeflow-resource-stopped: "true"
 spec:
   template:
     spec:
       serviceAccountName: jupyter-2025-1
       containers:
         - name: jupyter-2025-1
-          image: image-registry.openshift-image-registry.svc:5000/redhat-ods-applications/jupyter-datascience-notebook:2025.1
+          image: image-registry.openshift-image-registry.svc:5000/redhat-ods-applications/jupyter-datascience-cpu-py312-ubi9:2025.1
           resources:
             requests:
               cpu: "1"
@@ -145,7 +178,6 @@ metadata:
   annotations:
     opendatahub.io/image-display-name: "code-server | 2025.1"
     notebooks.opendatahub.io/inject-oauth: "true"
-    kubeflow-resource-stopped: "true"
 spec:
   template:
     spec:
@@ -184,6 +216,10 @@ metadata:
   annotations:
     opendatahub.io/image-display-name: "RStudio | 2025.1"
     notebooks.opendatahub.io/inject-oauth: "true"
+    # RStudio is intentionally left Stopped — the rstudio-rhel9 ImageStream ships
+    # without a published tag; an RHOAI admin has to run the bundled BuildConfig
+    # (or accept the RStudio license) before it can actually start. Realistic
+    # pre-migration state: the workbench exists but isn't running.
     kubeflow-resource-stopped: "true"
 spec:
   template:
@@ -191,7 +227,7 @@ spec:
       serviceAccountName: rstudio-latest
       containers:
         - name: rstudio-latest
-          image: image-registry.openshift-image-registry.svc:5000/redhat-ods-applications/rstudio-notebook:2025.1
+          image: image-registry.openshift-image-registry.svc:5000/redhat-ods-applications/rstudio-rhel9:latest
           resources:
             requests:
               cpu: "1"
@@ -211,6 +247,50 @@ spec:
           persistentVolumeClaim:
             claimName: rstudio-latest
 ---
+# Custom-image workbench — uses an UPSTREAM Jupyter image (not RHOAI's ImageStream).
+# §2.6.1 flags custom images as needing migration to the Kubernetes Gateway API for
+# path-based routing. Having this Notebook lets rhai-cli exercise that check path.
+apiVersion: kubeflow.org/v1
+kind: Notebook
+metadata:
+  name: custom
+  namespace: workbenches-regular
+  labels:
+    app: custom
+    opendatahub.io/dashboard: "true"
+  annotations:
+    opendatahub.io/image-display-name: "Custom | SciPy Notebook (upstream)"
+    notebooks.opendatahub.io/inject-oauth: "true"
+spec:
+  template:
+    spec:
+      serviceAccountName: custom
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 100
+        fsGroup: 100
+      containers:
+        - name: custom
+          image: quay.io/jupyter/scipy-notebook:lab-4.2.5
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          ports:
+            - containerPort: 8888
+              name: notebook-port
+              protocol: TCP
+          volumeMounts:
+            - name: custom
+              mountPath: /opt/app-root/src
+      volumes:
+        - name: custom
+          persistentVolumeClaim:
+            claimName: custom
+---
 # Jupyter workbench in hardware-profile namespace (already on 2025.1 so migration can compare)
 apiVersion: kubeflow.org/v1
 kind: Notebook
@@ -223,14 +303,13 @@ metadata:
   annotations:
     opendatahub.io/image-display-name: "Jupyter | Standard Data Science | CPU | 2025.1"
     notebooks.opendatahub.io/inject-oauth: "true"
-    kubeflow-resource-stopped: "true"
 spec:
   template:
     spec:
       serviceAccountName: jupyter-2025-1
       containers:
         - name: jupyter-2025-1
-          image: image-registry.openshift-image-registry.svc:5000/redhat-ods-applications/jupyter-datascience-notebook:2025.1
+          image: image-registry.openshift-image-registry.svc:5000/redhat-ods-applications/jupyter-datascience-cpu-py312-ubi9:2025.1
           resources:
             requests:
               cpu: "1"
