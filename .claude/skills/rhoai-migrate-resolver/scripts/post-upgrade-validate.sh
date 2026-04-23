@@ -3,8 +3,16 @@
 # Covers the post-upgrade verification tasks from the migration guide.
 #
 # This script does not modify the cluster. Run as cluster-admin.
-# Exit code: 0 if all checks PASS, 1 if any critical FAIL.
-
+#
+# Severities:
+#   PASS — check is green
+#   WARN — unusual state, no action strictly required
+#   FAIL — real regression; run the named resolver to fix
+#   TODO — required post-upgrade user action documented in the migration guide
+#          (e.g. patching stopped workbenches, recreating LSDs from archive).
+#          A clean cluster with no FAILs can still have open TODOs.
+#
+# Exit code: 0 if no FAIL, 1 if any FAIL. TODOs do not fail the script.
 # pipefail omitted: many checks pipe `oc ... | grep -q ...`, and grep exiting early
 # on match surfaces as SIGPIPE (exit 141) and inverts the boolean.
 set -u
@@ -12,9 +20,11 @@ set -u
 PASS=0
 FAIL=0
 WARN=0
+TODO=0
 c_pass=$'\033[1;32m'
 c_fail=$'\033[1;31m'
 c_warn=$'\033[1;33m'
+c_todo=$'\033[1;36m'
 c_dim=$'\033[2m'
 c_off=$'\033[0m'
 
@@ -24,6 +34,7 @@ check() {
     PASS) printf '%b[PASS]%b %s%s%b\n' "$c_pass" "$c_off" "$name" "${detail:+  $c_dim$detail$c_off}" "" ; PASS=$((PASS+1)) ;;
     FAIL) printf '%b[FAIL]%b %s%s%b\n' "$c_fail" "$c_off" "$name" "${detail:+  $detail}" "" ; FAIL=$((FAIL+1)) ;;
     WARN) printf '%b[WARN]%b %s%s%b\n' "$c_warn" "$c_off" "$name" "${detail:+  $detail}" "" ; WARN=$((WARN+1)) ;;
+    TODO) printf '%b[TODO]%b %s%s%b\n' "$c_todo" "$c_off" "$name" "${detail:+  $detail}" "" ; TODO=$((TODO+1)) ;;
   esac
 }
 
@@ -42,7 +53,7 @@ case "$csv_new" in
   *)                    check WARN "[operator] RHOAI operator CSV" "$csv_new — unexpected" ;;
 esac
 
-if oc get csv -n redhat-ods-operator 2>/dev/null | grep -q 'rhods-operator\.2\.'; then
+if oc get csv -n redhat-ods-operator -o name 2>/dev/null | grep -q 'rhods-operator\.2\.'; then
   check FAIL "[operator] old 2.x operator gone" "a 2.x rhods-operator CSV is still present"
 else
   check PASS "[operator] old 2.x operator gone"
@@ -133,11 +144,50 @@ if oc get dspa -A --no-headers 2>/dev/null | grep -q .; then
 fi
 
 # [trustyai] TrustyAI operator
+has_tas=0
 if oc get trustyaiservice -A --no-headers 2>/dev/null | grep -q .; then
+  has_tas=1
   if oc -n redhat-ods-applications get deployment trustyai-service-operator-controller-manager -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null | grep -qx True; then
     check PASS "[trustyai] operator Available"
   else
     check FAIL "[trustyai] operator Available" "trustyai-service-operator-controller-manager not Available"
+  fi
+fi
+
+# [trustyai] GuardrailsOrchestrator — stuck Progressing with zero pods is a known 3.x regression.
+# DeploymentReady=True is the operational signal; .status.phase may linger at Progressing
+# when a downstream dependency (e.g. InferenceService) isn't ready, which is not a FAIL.
+if oc get guardrailsorchestrator -A --no-headers 2>/dev/null | grep -q .; then
+  broken_gorch=""
+  warn_gorch=""
+  while IFS=$'\t' read -r ns name phase dep_ready; do
+    [[ -z "$ns" ]] && continue
+    if [[ "$dep_ready" == "True" ]]; then
+      # Deployment is ready — orchestrator is up regardless of overall phase
+      continue
+    fi
+    # No DeploymentReady=True → check for pods in the namespace
+    if oc get pods -n "$ns" -l "app=$name" --no-headers 2>/dev/null | grep -q .; then
+      warn_gorch="${warn_gorch}${ns}/${name}=${phase} "
+    else
+      broken_gorch="${broken_gorch}${ns}/${name} "
+    fi
+  done < <(oc get guardrailsorchestrator -A -o json 2>/dev/null | jq -r '
+    .items[]
+    | [
+        .metadata.namespace,
+        .metadata.name,
+        (.status.phase // ""),
+        ((.status.conditions[]? | select(.type == "DeploymentReady") | .status) // "")
+      ]
+    | @tsv
+  ')
+  if [[ -n "$broken_gorch" ]]; then
+    check FAIL "[trustyai] GuardrailsOrchestrator Ready" "stuck + no pods: ${broken_gorch}— see trustyai.md (Guardrails)"
+  elif [[ -n "$warn_gorch" ]]; then
+    check WARN "[trustyai] GuardrailsOrchestrator phase" "$warn_gorch — reconciling or needs otelExporter restore"
+  else
+    check PASS "[trustyai] GuardrailsOrchestrator Deployment Ready"
   fi
 fi
 
@@ -231,12 +281,104 @@ if oc get pytorchjob -A --no-headers 2>/dev/null | grep -q .; then
   check PASS "[kfto] PyTorchJobs present" "$(oc get pytorchjob -A --no-headers 2>/dev/null | wc -l | tr -d ' ') jobs"
 fi
 
+# -----------------------------------------------------------------------------
+# TODO — required post-upgrade user actions from the migration guide.
+# These don't show as FAIL because the cluster isn't "broken" — but a cluster
+# cannot be considered finalized until each of these is addressed.
+# -----------------------------------------------------------------------------
+
+# [workbenches] TODO — any Notebook still carrying the 2.x inject-oauth annotation
+# needs the 2.x→3.x patch helper. Migrated CRs have notebooks.opendatahub.io/inject-auth=true
+# and no longer have the legacy inject-oauth marker.
+unmigrated_nb=$(oc get notebook -A -o json 2>/dev/null | jq -r '
+  [.items[]
+    | select(
+        (.metadata.annotations."notebooks.opendatahub.io/inject-oauth" == "true")
+        and ((.metadata.annotations."notebooks.opendatahub.io/inject-auth" // "") != "true")
+      )
+  ] | length
+')
+if [[ "${unmigrated_nb:-0}" -gt 0 ]]; then
+  check TODO "[workbenches] patch ${unmigrated_nb} unmigrated workbench(es)" \
+    "run workbench-2.x-to-3.x-upgrade.sh patch --only-stopped --with-cleanup -y (see workbenches.md)"
+fi
+
+# [workbenches] TODO — custom BYON ImageStreams in redhat-ods-applications won't survive the ns refresh
+# Heuristic: list ImageStreams whose name doesn't match a default 3.x image-bundle name.
+if oc get notebook -A --no-headers 2>/dev/null | grep -q .; then
+  check TODO "[workbenches] re-import any custom BYON ImageStreams" \
+    "redhat-ods-applications is refreshed on upgrade; user-managed ImageStreams must be re-imported (see workbenches.md)"
+fi
+
+# [ray] TODO — RayClusters still carrying the 2.x `ray.openshift.ai/version: UNKNOWN`
+# annotation need the KubeRay migration script. A successful post-upgrade run writes a
+# 3.x version value. (If the 2.x install never had CodeFlare sidecars, the post-upgrade
+# script is a no-op and the annotation stays UNKNOWN — it's still listed as a TODO so the
+# admin confirms this explicitly; see ray.md "Known quirk".)
+rc_unmigrated=$(oc get raycluster -A -o json 2>/dev/null | jq -r '
+  [.items[]
+    | select(
+        ((.metadata.annotations."ray.openshift.ai/version" // "UNKNOWN") == "UNKNOWN")
+        or ((.metadata.annotations."ray.openshift.ai/version" // "") | startswith("2."))
+      )
+  ] | length
+')
+if [[ "${rc_unmigrated:-0}" -gt 0 ]]; then
+  check TODO "[ray] migrate ${rc_unmigrated} RayCluster(s) to 3.x KubeRay conventions" \
+    "run ray_cluster_migration.py post-upgrade (prerequisite: workbenches resolver complete) — see ray.md"
+fi
+
+# [model-serving] TODO — inferenceservice-config ConfigMap must be flipped back to managed=true
+ifs_managed=$(oc get configmap inferenceservice-config -n redhat-ods-applications \
+  -o jsonpath='{.metadata.annotations.opendatahub\.io/managed}' 2>/dev/null || echo "")
+case "$ifs_managed" in
+  true)  check PASS "[model-serving] inferenceservice-config managed=true" ;;
+  false) check TODO "[model-serving] restore inferenceservice-config managed=true" \
+           "was set to false pre-upgrade; flip back + rollout restart kserve-controller-manager (see model-serving.md)" ;;
+  "")    : ;; # annotation absent — common on fresh 3.x installs, nothing to do
+  *)     check WARN "[model-serving] inferenceservice-config managed=$ifs_managed" "unexpected value" ;;
+esac
+
+# [pipelines] TODO — admin runs post_upgrade_check.sh; users validate pipelines
+if oc get dspa -A --no-headers 2>/dev/null | grep -q .; then
+  check TODO "[pipelines] run post_upgrade_check.sh and have users validate pipelines" \
+    "per-DSPA health + user task: import/execute/scheduled-runs check (see pipelines.md)"
+fi
+
+# [registry] TODO — announce dashboard nav change (Models → AI hub)
+if oc get modelregistry.modelregistry.opendatahub.io -A --no-headers 2>/dev/null | grep -q .; then
+  check TODO "[registry] announce dashboard nav change: Models → AI hub" \
+    "registry + catalog pods are fine; users searching 'Model registry' won't find it (see registry-catalog.md)"
+fi
+
+# [llama-stack] TODO — if LSD CRD exists, user needs to recreate LSDs from pre-upgrade archive
+if oc get crd llamastackdistributions.llamastack.io >/dev/null 2>&1 \
+   || oc get crd llamastackdistributions.llamastack.opendatahub.io >/dev/null 2>&1; then
+  lsd_count=$(oc get llamastackdistribution -A --no-headers 2>/dev/null | wc -l | tr -d ' ')
+  if [[ "${lsd_count:-0}" -eq 0 ]]; then
+    check TODO "[llama-stack] recreate LSDs from pre-upgrade archive" \
+      "data (agent state, telemetry, vector DBs) was lost by design; skip if you didn't use Llama Stack in 2.25 (see llama-stack.md)"
+  else
+    check PASS "[llama-stack] LSDs present" "$lsd_count"
+  fi
+fi
+
+# [trustyai] TODO — check backups vs live + restore if data loss
+if (( has_tas == 1 )); then
+  check TODO "[trustyai] verify backups vs live metrics; restore if data loss" \
+    "run the Check backups / Restore data steps (see trustyai.md)"
+fi
+
 echo
 echo "========================================================="
-printf 'Summary: %b%d PASS%b  %b%d WARN%b  %b%d FAIL%b\n' \
-  "$c_pass" "$PASS" "$c_off" "$c_warn" "$WARN" "$c_off" "$c_fail" "$FAIL" "$c_off"
+printf 'Summary: %b%d PASS%b  %b%d WARN%b  %b%d FAIL%b  %b%d TODO%b\n' \
+  "$c_pass" "$PASS" "$c_off" "$c_warn" "$WARN" "$c_off" "$c_fail" "$FAIL" "$c_off" "$c_todo" "$TODO" "$c_off"
 if (( FAIL > 0 )); then
   echo "Post-upgrade issues remain. Walk through the resolvers in resolvers/post-upgrade/ — the label in brackets (e.g. [operator]) is the resolver filename."
   exit 1
+fi
+if (( TODO > 0 )); then
+  echo "Platform healthy — required post-upgrade tasks remain. Walk each [TODO] through its resolver in resolvers/post-upgrade/, then re-run this script."
+  exit 0
 fi
 echo "Post-upgrade validation clean. Finalization is complete."

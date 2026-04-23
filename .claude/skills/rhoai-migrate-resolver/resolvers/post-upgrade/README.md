@@ -17,7 +17,15 @@ After the RHOAI operator CSV reaches `rhods-operator.3.3.2` and the old 2.x CSV 
 
 ## Driving the skill
 
-Use the top-level [../../scripts/post-upgrade-validate.sh](../../scripts/post-upgrade-validate.sh) — it produces one PASS / WARN / FAIL line per check, each prefixed with a component label in brackets (`[operator]`, `[model-serving]`, etc.). Any FAIL maps to the corresponding resolver file in this directory. Walk the user through it, then have them re-run `post-upgrade-validate.sh` to confirm.
+Use the top-level [../../scripts/post-upgrade-validate.sh](../../scripts/post-upgrade-validate.sh) — it produces one PASS / WARN / FAIL / TODO line per check, each prefixed with a component label in brackets (`[operator]`, `[model-serving]`, etc.). Walk the user through **every FAIL and every TODO**, one component at a time, then have them re-run `post-upgrade-validate.sh` to confirm.
+
+Severities:
+
+- **PASS / WARN** — informational.
+- **FAIL** — a regression the resolver must fix. Script exits 1.
+- **TODO** — a required post-upgrade user action documented in the migration guide (patch stopped workbenches, recreate LSDs, run Ray migration script, etc.). A cluster with zero FAILs can still have open TODOs — finalization is not complete until each TODO is addressed. Script exits 0 with TODOs; the user is responsible for closing them.
+
+`FAIL`/`TODO` bracket labels map directly to the resolver filename below.
 
 ## Map from validator label → resolver
 

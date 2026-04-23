@@ -15,6 +15,19 @@ oc exec -n rhai-migration rhai-cli-0 -- \
 
 The script prints per-DSPA status. Expect either `All pipelines server pods are healthy` or a note that a pod is in the same state it was before upgrade (idle DSPAs stay idle).
 
+**Prerequisite** — `post_upgrade_check.sh` diffs against `/tmp/rhoai-upgrade-backup/ai_pipelines/dspa_pre_upgrade_pods.json`. That file is written only by `check_before_upgrade.sh` during the pre-upgrade phase. If you skipped the pre-upgrade check, the post-upgrade script exits with `ERROR: Pre-upgrade state file not found`. Fall back to the manual verification below:
+
+```
+# Every DSPA Ready
+oc get dspa -A -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,READY:.status.conditions[?(@.type=="Ready")].status'
+
+# All per-DSPA pods Running (label is component=data-science-pipelines)
+for ns in $(oc get dspa -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\n"}{end}' | sort -u); do
+  echo "--- $ns ---"
+  oc get pods -n "$ns" -l component=data-science-pipelines
+done
+```
+
 If the output flags a specific DSPA as unhealthy, inspect directly:
 
 ```

@@ -79,7 +79,7 @@ Once the RHOAI operator CSV reaches `rhods-operator.3.3.2` (or similar 3.x) and 
 
 ### Step 7 — run the post-upgrade validator
 
-Same shape as `validate.sh` but checks the post-upgrade state — DSC/DSCI Ready, CSV is 3.3.2 (2.25.4 gone), Gateway ready, KServe controller + ODH Model Controller running, every ISVC in RawDeployment mode with Ready=True, etc.
+Same shape as `validate.sh` but checks the post-upgrade state — DSC/DSCI Ready, CSV is 3.3.2 (2.25.4 gone), Gateway ready, KServe controller + ODH Model Controller running, every ISVC in RawDeployment mode with Ready=True, etc. It also emits `[TODO]` lines for **required post-upgrade user actions** documented in the migration guide (patch stopped workbenches, run Ray migration script, recreate LSDs from archive, restore ConfigMap management, etc.) — these are mandatory even when nothing is "broken".
 
 ```
 bash .claude/skills/rhoai-migrate-resolver/scripts/post-upgrade-validate.sh
@@ -87,7 +87,7 @@ bash .claude/skills/rhoai-migrate-resolver/scripts/post-upgrade-validate.sh
 
 ### Step 8 — walk through the component tasks
 
-[resolvers/post-upgrade/README.md](resolvers/post-upgrade/README.md) lists every task and routes to a resolver. Typical order — do the operator check first (platform-level health), then model serving, then workbenches (blocks Ray), then the rest in any order:
+Walk through **every FAIL and every TODO**, one component at a time, in the order below. A cluster with zero FAILs but open TODOs is *not* finalized — each TODO is a documented admin/user task the migration guide requires. Do the operator check first (platform-level health), then model serving, then workbenches (blocks Ray), then the rest in any order:
 
 | Component | Resolver | Purpose |
 | --- | --- | --- |

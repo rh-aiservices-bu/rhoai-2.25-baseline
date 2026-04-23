@@ -44,6 +44,10 @@ oc exec -n rhai-migration rhai-cli-0 -- \
   python3 /opt/rhai-upgrade-helpers/ray/ray_cluster_migration.py post-upgrade --dry-run
 ```
 
+### Known quirk — "Migrated: N" but `list` still says [NEEDS MIGRATION]
+
+If the 2.x install never actually had CodeFlare TLS/OAuth sidecars or a dashboard Route (clean upstream KubeRay CRs), `post-upgrade` prints `Migrated: N` in its summary but skips the annotation write, so `list` still shows `[NEEDS MIGRATION]` afterwards. Verify by describing the CR — if there is no legacy sidecar/ServiceAccount to remove and pods are all `Running` with `status=ready`, the workload is already 3.x-shaped and safe to leave alone.
+
 ## Migrate
 
 Pick the scope — single cluster, namespace, or whole cluster:

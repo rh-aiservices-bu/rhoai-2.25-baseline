@@ -52,6 +52,48 @@ oc get guardrailsorchestrator -A -o json \
   | jq -r '.items[] | "\(.metadata.namespace)/\(.metadata.name)  otel=\(.spec.otelExporter // "none")"'
 ```
 
+### Gotcha 1 — missing orchestratorConfig ConfigMap
+
+A GuardrailsOrchestrator whose `spec.orchestratorConfig: <name>` points at a **ConfigMap that doesn't exist in the same namespace** stays silently stuck in `phase=Progressing, reason=ReconcileInit` with **zero pods** and **no operator log entries** — the controller is running, but it doesn't surface the missing dependency. Verify:
+
+```
+NS=<ns>; CM=$(oc get guardrailsorchestrator -n "$NS" -o jsonpath='{.items[0].spec.orchestratorConfig}')
+oc get cm "$CM" -n "$NS" || echo "ConfigMap $CM is MISSING — this is why the CR won't reconcile"
+```
+
+The ConfigMap must contain a `config.yaml` key. Minimum viable content (the orchestrator Rust binary requires at least one detector entry or it exits with `Error: no detectors configured`):
+
+```yaml
+openai:
+  service:
+    hostname: <llm-service>.<ns>.svc
+    port: 8080
+detectors:
+  placeholder:
+    type: text_contents
+    service:
+      hostname: <detector-service>.<ns>.svc
+      port: 8080
+    chunker_id: whole_doc_chunker
+    default_threshold: 0.5
+```
+
+Notes:
+- `chat_generation` is deprecated in 3.x — use `openai` instead.
+- After creating the ConfigMap, force a reconcile by bumping any annotation on the CR: `oc annotate guardrailsorchestrator <name> -n <ns> reconcile-trigger="$(date +%s)" --overwrite`
+
+### Gotcha 2 — scrubbed otelExporter fields
+
+The 3.x CRD renamed the 2.x otelExporter fields. If you see warnings like `unknown field "spec.otelExporter.otlpEndpoint"` when patching, the 2.x → 3.x mapping is:
+
+| 2.x field | 3.x field |
+| --- | --- |
+| `otlpEndpoint` | `otlpMetricsEndpoint` and/or `otlpTracesEndpoint` (split per signal) |
+| `otlpExport: "metrics,traces"` | `enableMetrics: true` + `enableTraces: true` |
+| `protocol` | `otlpProtocol` |
+
+Use `oc explain guardrailsorchestrator.spec.otelExporter` to confirm the current schema before patching.
+
 If `otelExporter` was scrubbed during upgrade, restore it from the backup you captured in the pre-upgrade Guardrails step:
 
 ```

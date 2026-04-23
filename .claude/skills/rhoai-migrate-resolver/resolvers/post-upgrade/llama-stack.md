@@ -13,7 +13,10 @@ The old LSD CRs cannot be restored — the spec schema changed between 2.25 and 
 **Skip this section if:**
 
 - You didn't use Llama Stack in 2.25, or
+- The pre-upgrade archive step was never run (check `ls /tmp/rhoai-upgrade-backup/llama-stack/` inside the rhai-cli pod — if the directory is missing, there is nothing to recreate *from*), or
 - You are on a disconnected cluster (Llama Stack requires 3.0+ for disconnected — check your support window).
+
+If you **did** use Llama Stack in 2.25 but the backup is missing, the data cannot be recovered — the 2.x SQLite was wiped by the upgrade. You must rebuild any downstream agents / RAG pipelines from source.
 
 ## Key 2.25 → 3.3.2 differences
 

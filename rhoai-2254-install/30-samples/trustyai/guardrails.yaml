@@ -7,6 +7,31 @@ metadata:
     opendatahub.io/dashboard: "true"
     modelmesh-enabled: "false"
 ---
+# Orchestrator config — referenced by GuardrailsOrchestrator.spec.orchestratorConfig.
+# Without this ConfigMap, the trustyai operator silently refuses to reconcile the
+# GuardrailsOrchestrator CR (no pods, status frozen at Progressing/ReconcileInit).
+# Minimal config: no detectors registered, chat_generation pointing at a placeholder
+# vLLM service. Replace the hostname for any real LLM use case.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fms-orchestr8-config-nlp
+  namespace: test-guardrails-builtin-upgrade
+data:
+  config.yaml: |
+    openai:
+      service:
+        hostname: llm-placeholder.test-guardrails-builtin-upgrade.svc
+        port: 8080
+    detectors:
+      placeholder:
+        type: text_contents
+        service:
+          hostname: detector-placeholder.test-guardrails-builtin-upgrade.svc
+          port: 8080
+        chunker_id: whole_doc_chunker
+        default_threshold: 0.5
+---
 # GuardrailsOrchestrator with OTLP exporter config — migration §2.5.4 backs up this config.
 apiVersion: trustyai.opendatahub.io/v1alpha1
 kind: GuardrailsOrchestrator

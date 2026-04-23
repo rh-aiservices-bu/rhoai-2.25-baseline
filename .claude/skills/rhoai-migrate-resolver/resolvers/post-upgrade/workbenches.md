@@ -28,9 +28,11 @@ Run the helper inside the rhai-cli container:
 ```
 oc exec -n rhai-migration rhai-cli-0 -- bash -c '
   cd /opt/rhai-upgrade-helpers/workbenches && \
-  ./workbench-2.x-to-3.x-upgrade.sh patch --only-stopped --with-cleanup
+  ./workbench-2.x-to-3.x-upgrade.sh patch --only-stopped --with-cleanup -y
 '
 ```
+
+The `-y/--yes` flag is required for non-interactive use (`oc exec` does not give the helper a TTY for its confirmation banner — without it the script exits 1 immediately).
 
 Expected final lines:
 
