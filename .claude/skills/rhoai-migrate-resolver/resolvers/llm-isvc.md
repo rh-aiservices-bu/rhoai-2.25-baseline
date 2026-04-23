@@ -65,11 +65,91 @@ metadata:
 EOF
 ```
 
-Verify the authorino + kuadrant readiness checks pass:
+Verify the kuadrant readiness check passes:
 
 ```
 oc get kuadrant kuadrant -n kuadrant-system -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'; echo
 oc get authorino -A
+```
+
+> **Gateway API provider prerequisite:** Kuadrant will sit at `Ready=False` with `MissingDependency: [Gateway API provider (istio / envoy gateway)] is not installed` until a Gateway API provider exists. On OCP 4.19+ install **Service Mesh v3** (`servicemeshoperator3`, channel `stable`, in `openshift-operators`) and create an `Istio` + `IstioCNI` CR:
+>
+> ```
+> oc apply -f - <<'EOF'
+> apiVersion: operators.coreos.com/v1alpha1
+> kind: Subscription
+> metadata: { name: servicemeshoperator3, namespace: openshift-operators }
+> spec:
+>   channel: stable
+>   name: servicemeshoperator3
+>   source: redhat-operators
+>   sourceNamespace: openshift-marketplace
+>   installPlanApproval: Automatic
+> ---
+> apiVersion: sailoperator.io/v1
+> kind: Istio
+> metadata: { name: default }
+> spec: { version: v1.26.3, namespace: istio-system, updateStrategy: { type: InPlace } }
+> ---
+> apiVersion: sailoperator.io/v1
+> kind: IstioCNI
+> metadata: { name: default }
+> spec: { version: v1.26.3, namespace: istio-cni }
+> EOF
+>
+> oc create ns istio-cni 2>/dev/null || true
+> # Restart kuadrant-operator so it re-detects the provider
+> oc delete pod -n openshift-operators -l app.kubernetes.io/name=kuadrant-operator
+> ```
+
+### 1b. Enable TLS on the Authorino listener
+
+The rhai-cli `authorino-tls-readiness` check requires `spec.listener.tls.enabled=true` and `spec.oidcServer.tls.enabled=true` on the Authorino CR that RHCL creates. The Kuadrant CR does not expose a field for this, so issue certs via cert-manager and patch the Authorino CR directly:
+
+```
+oc apply -f - <<'EOF'
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata: { name: authorino-selfsigned }
+spec: { selfSigned: {} }
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata: { name: authorino-server-cert, namespace: kuadrant-system }
+spec:
+  secretName: authorino-server-cert
+  duration: 87600h
+  issuerRef: { name: authorino-selfsigned, kind: ClusterIssuer }
+  commonName: authorino-authorization.kuadrant-system.svc
+  dnsNames:
+    - authorino-authorization.kuadrant-system.svc
+    - authorino-authorization.kuadrant-system.svc.cluster.local
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata: { name: authorino-oidc-server-cert, namespace: kuadrant-system }
+spec:
+  secretName: authorino-oidc-server-cert
+  duration: 87600h
+  issuerRef: { name: authorino-selfsigned, kind: ClusterIssuer }
+  commonName: authorino-oidc.kuadrant-system.svc
+  dnsNames:
+    - authorino-oidc.kuadrant-system.svc
+    - authorino-oidc.kuadrant-system.svc.cluster.local
+EOF
+
+oc patch authorino authorino -n kuadrant-system --type=merge -p '{
+  "spec":{
+    "listener":{"tls":{"enabled":true,"certSecretRef":{"name":"authorino-server-cert"}}},
+    "oidcServer":{"tls":{"enabled":true,"certSecretRef":{"name":"authorino-oidc-server-cert"}}}
+  }
+}'
+```
+
+Verify:
+
+```
+oc get authorino authorino -n kuadrant-system -o jsonpath='listener={.spec.listener.tls.enabled} oidc={.spec.oidcServer.tls.enabled} ready={.status.conditions[?(@.type=="Ready")].status}'; echo
 ```
 
 ### 2. Disconnected environments

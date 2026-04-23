@@ -2,6 +2,12 @@
 
 **rhai-cli signal:** `component / ray / *` or `component / codeflare / *`.
 
+> **Important:** the DSC spec has **two separate components** — `codeflare` and `ray` — even though rhai-cli reports the CodeFlare blocker under the `ray/removal` key. Flip **both** to `Removed`:
+>
+> ```
+> oc patch $(oc get dsc -o name | head -n1) --type=merge -p '{"spec":{"components":{"codeflare":{"managementState":"Removed"},"ray":{"managementState":"Removed"}}}}'
+> ```
+
 ## Why
 
 > The upstream Codeflare project is no longer under active development. KubeRay now handles all Ray cluster management independently.

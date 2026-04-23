@@ -1,4 +1,7 @@
-# rhai-cli output → resolver map
+# Pre-upgrade resolvers — rhai-cli output → resolver map
+
+> For the **post-upgrade** chapter 4 resolvers, see [post-upgrade/README.md](post-upgrade/README.md).
+
 
 The `rhai-cli lint --target-version 3.3.2` report has one row per check with columns:
 

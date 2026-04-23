@@ -110,12 +110,41 @@ else
   check PASS "§2.8.9 Service Mesh v2" "uninstalled"
 fi
 
-# §2.8.9 Standalone Authorino uninstalled
-# (RHCL also bundles Authorino — we want standalone gone, RHCL ok)
-if oc get csv -n openshift-operators 2>/dev/null | grep -q 'authorino-operator\.'; then
-  check FAIL "§2.8.9 standalone Authorino" "authorino-operator still present in openshift-operators — uninstall; RHCL replaces it"
+# §2.8.9 Standalone Authorino
+# RHCL (rhcl-operator) pulls in authorino-operator as a dependency. Per
+# resolvers/kserve.md § "Uninstall standalone Authorino": do NOT uninstall the
+# operator if RHCL is installed — RHCL owns it.
+rhcl_present=0
+if oc get csv -A 2>/dev/null | grep -q 'rhcl-operator\.'; then rhcl_present=1; fi
+authorino_present=0
+if oc get csv -n openshift-operators 2>/dev/null | grep -q 'authorino-operator\.'; then authorino_present=1; fi
+if (( rhcl_present == 1 )); then
+  check PASS "§2.8.9 Authorino" "RHCL installed — RHCL manages authorino-operator (standalone uninstall not required)"
+elif (( authorino_present == 1 )); then
+  check FAIL "§2.8.9 standalone Authorino" "authorino-operator present and RHCL not installed — install RHCL (which bundles Authorino) or uninstall the standalone operator"
 else
   check PASS "§2.8.9 standalone Authorino" "uninstalled"
+fi
+
+# llm-d readiness — Kuadrant CR + Authorino TLS
+if oc get kuadrant -A 2>/dev/null | grep -q .; then
+  k_ready=$(oc get kuadrant -A -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
+  if [[ "$k_ready" == "True" ]]; then
+    check PASS "llm-d: Kuadrant Ready"
+  else
+    check FAIL "llm-d: Kuadrant Ready" "Kuadrant CR present but not Ready (status=$k_ready) — check Gateway API provider and operator logs"
+  fi
+  a_ns=$(oc get authorino -A -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || echo "")
+  a_name=$(oc get authorino -A -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+  if [[ -n "$a_name" ]]; then
+    l_tls=$(oc get authorino "$a_name" -n "$a_ns" -o jsonpath='{.spec.listener.tls.enabled}' 2>/dev/null || echo "")
+    o_tls=$(oc get authorino "$a_name" -n "$a_ns" -o jsonpath='{.spec.oidcServer.tls.enabled}' 2>/dev/null || echo "")
+    if [[ "$l_tls" == "true" && "$o_tls" == "true" ]]; then
+      check PASS "llm-d: Authorino TLS" "listener+oidc TLS enabled"
+    else
+      check FAIL "llm-d: Authorino TLS" "listener.tls=$l_tls oidcServer.tls=$o_tls — both must be true (required by rhai-cli authorino-tls-readiness)"
+    fi
+  fi
 fi
 
 # DSC overall Ready

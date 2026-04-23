@@ -10,6 +10,77 @@ stringData:
   database-password: modelregistrypassword
   database-user: mlmduser
 ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: my-model-registry-db
+  namespace: rhoai-model-registries
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-model-registry-db
+  namespace: rhoai-model-registries
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: my-model-registry-db }
+  template:
+    metadata:
+      labels: { app: my-model-registry-db }
+    spec:
+      containers:
+        - name: mariadb
+          image: registry.redhat.io/rhel9/mariadb-1011:latest
+          env:
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: my-model-registry-db-credentials
+                  key: database-user
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: my-model-registry-db-credentials
+                  key: database-password
+            - name: MYSQL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: my-model-registry-db-credentials
+                  key: database-name
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: my-model-registry-db-credentials
+                  key: database-password
+          ports:
+            - containerPort: 3306
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: my-model-registry-db
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-model-registry-db
+  namespace: rhoai-model-registries
+spec:
+  selector:
+    app: my-model-registry-db
+  ports:
+    - port: 3306
+      targetPort: 3306
+---
 # ModelRegistry — migration §2.3 verifies registry + db + catalog pods Running pre-upgrade.
 apiVersion: modelregistry.opendatahub.io/v1alpha1
 kind: ModelRegistry

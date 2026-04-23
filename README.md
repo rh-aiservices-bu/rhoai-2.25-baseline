@@ -67,13 +67,19 @@ A successful install leaves two workloads in non-Ready states on purpose — don
 
 ## After the install
 
-1. Run the migration assessment from chapter 1 of the migration guide (`rhai-cli lint --target-version 3.3.2`).
-2. Walk through chapter 2 (§2.x steps) to resolve every blocker — the [rhoai-migrate-resolver](.claude/skills/rhoai-migrate-resolver/) skill below guides you through this step-by-step.
-3. Proceed to chapter 3 of the migration guide once the readiness validation is clean.
+1. Run the migration assessment (`rhai-cli lint --target-version 3.3.2`).
+2. Resolve every blocker — the [rhoai-migrate-resolver](.claude/skills/rhoai-migrate-resolver/) skill walks you through the pre-upgrade tasks step-by-step.
+3. Run the upgrade itself.
+4. Walk through post-upgrade tasks — the same skill covers this phase.
 
-## Resolving migration blockers (Claude Code skill)
+## Guided migration (Claude Code skill)
 
-A Claude Code skill, [rhoai-migrate-resolver](.claude/skills/rhoai-migrate-resolver/), walks a cluster administrator through resolving every blocker `rhai-cli` reports. The skill is **read-only on the cluster** — it recommends `oc` commands and explains *why* each change is needed (citing [architectural-changes.md](architectural-changes.md)) but never executes mutations itself.
+A Claude Code skill, [rhoai-migrate-resolver](.claude/skills/rhoai-migrate-resolver/), walks a cluster administrator through **both** sides of the migration:
+
+- **Pre-upgrade tasks** — resolve every blocker reported by `rhai-cli lint --target-version 3.3.2`.
+- **Post-upgrade tasks** — verify the freshly-upgraded 3.3.2 cluster and walk each component's finalization work.
+
+The skill is **read-only on the cluster** — it recommends `oc` commands and explains *why* each change is needed (citing [architectural-changes.md](architectural-changes.md)) but never executes mutations itself.
 
 ### Use the skill inside Claude Code
 
@@ -83,22 +89,28 @@ Open this project in Claude Code, then:
 /rhoai-migrate-resolver
 ```
 
-Claude will ask for the `rhai-cli` output (file path or pasted table), parse the `prohibited` / `critical` rows, and walk you through one resolver at a time.
+Claude will ask which phase you're in. For pre-upgrade it parses the `rhai-cli` output and walks through one resolver at a time. For post-upgrade, ask it to *walk me through post-upgrade tasks* — it runs the validator, groups issues by component, and walks them one at a time.
 
-### Or run the two helper scripts directly
+### Or run the three helper scripts directly
 
-Both scripts are self-contained bash — no Claude Code required — and only use read-only `oc get` / `oc describe`:
+All three are self-contained bash — no Claude Code required — and only use read-only `oc get` / `oc describe`:
 
 ```sh
-# Before you start — are the platform prerequisites met? (OCP version, pull secret, StorageClass, DSC present)
+# Before you start — platform prereqs (OCP version, pull secret, StorageClass, DSC present)
 bash .claude/skills/rhoai-migrate-resolver/scripts/prereqs.sh
 
-# After all migration prep — is every §2.x blocker resolved?
+# After pre-upgrade prep — is every migration blocker resolved?
 bash .claude/skills/rhoai-migrate-resolver/scripts/validate.sh
+
+# After the upgrade — is the 3.3.2 cluster healthy and are the post-upgrade tasks complete?
+bash .claude/skills/rhoai-migrate-resolver/scripts/post-upgrade-validate.sh
 ```
 
-Exit `0` means all checks pass; `1` means at least one FAIL. Run `validate.sh` *with* `rhai-cli lint`, not instead of it — they cross-check each other.
+Each exits `0` only if every check PASSes. Run `validate.sh` / `post-upgrade-validate.sh` *with* `rhai-cli lint`, not instead of it — they cross-check each other.
+
+The post-upgrade validator prefixes each output line with a component label in brackets — `[operator]`, `[model-serving]`, `[workbenches]`, `[ray]`, `[trustyai]`, `[pipelines]`, `[feast]`, `[registry]`, `[llama-stack]`, `[kfto]`. Each label maps 1:1 to a resolver filename under [resolvers/post-upgrade/](.claude/skills/rhoai-migrate-resolver/resolvers/post-upgrade/).
 
 ### What the skill covers
 
-Each resolver under [.claude/skills/rhoai-migrate-resolver/resolvers/](.claude/skills/rhoai-migrate-resolver/resolvers/) maps a class of `rhai-cli` output rows to a fix. See [resolvers/README.md](.claude/skills/rhoai-migrate-resolver/resolvers/README.md) for the full `(GROUP, KIND, CHECK) → resolver` mapping. Coverage spans every migration path the install script deliberately creates — Kueue removal, KServe Serverless/ModelMesh conversion, Service Mesh 2 / Serverless / standalone Authorino uninstall, workbench image rebuilds, TrustyAI + Ray + Llama Stack backups, LLMInferenceService template pinning, and more.
+- **Pre-upgrade resolvers:** [resolvers/README.md](.claude/skills/rhoai-migrate-resolver/resolvers/README.md) maps `rhai-cli` output `(GROUP, KIND, CHECK)` rows to a fix. Covers Kueue removal, KServe Serverless/ModelMesh conversion, Service Mesh 2 / Serverless / standalone Authorino uninstall, workbench image rebuilds, TrustyAI + Ray + Llama Stack backups, LLMInferenceService RHCL+template setup, and more.
+- **Post-upgrade resolvers:** [resolvers/post-upgrade/README.md](.claude/skills/rhoai-migrate-resolver/resolvers/post-upgrade/README.md) covers every component task — operator + Gateway health, model-serving finalization + 503 troubleshooting, workbench patch + deferred migration, Ray cluster migration script, AI Hub registry/catalog, Feature Store, Llama Stack recreate-from-archive, AI Pipelines post-upgrade check, TrustyAI backups/Guardrails/data-restore/GPU-deadlock, KFTO PyTorchJob verification.

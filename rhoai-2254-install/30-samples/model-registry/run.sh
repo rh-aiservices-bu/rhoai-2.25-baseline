@@ -23,6 +23,5 @@ oc get ns rhoai-model-registries >/dev/null 2>&1 \
 
 wait_for_crd modelregistries.modelregistry.opendatahub.io 600
 apply_manifest "${SCRIPT_DIR}/registry.yaml"
-log "model-registry: ModelRegistry applied"
-log "  note: a MySQL/MariaDB called my-model-registry-db is expected at spec.mysql.host."
-log "  supply your own DB or deploy one alongside. The CR exists regardless, so §2.3 verification has input."
+wait_for_rollout deployment my-model-registry-db rhoai-model-registries 300
+log "model-registry: ModelRegistry + MariaDB applied"
