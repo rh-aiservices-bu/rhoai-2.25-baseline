@@ -1,0 +1,81 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ml-project-raw
+  labels:
+    opendatahub.io/dashboard: "true"
+    modelmesh-enabled: "false"
+---
+# Custom per-namespace vLLM-CPU ServingRuntime — the real-world production pattern
+# where users define their own SR alongside the ISVC. Matches the "ai-lifecoach/vllm-cpu"
+# shape from the dev.rhoai cluster. CPU-only so it schedules on any worker.
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: vllm-cpu
+  namespace: ml-project-raw
+  labels:
+    opendatahub.io/dashboard: "true"
+  annotations:
+    opendatahub.io/apiProtocol: REST
+    opendatahub.io/template-display-name: "CUSTOM - vLLM Serving Runtime for CPU"
+    opendatahub.io/template-name: vllm-cpu
+    openshift.io/display-name: "CUSTOM - vLLM CPU"
+spec:
+  multiModel: false
+  supportedModelFormats:
+    - name: vLLM
+      autoSelect: true
+  containers:
+    - name: kserve-container
+      image: quay.io/rh-aiservices-bu/vllm-cpu-openai-ubi9:0.3
+      args:
+        - --model
+        - /mnt/models
+        - --port
+        - "8080"
+        - --max-model-len
+        - "2048"
+        - --served-model-name
+        - tinyllama
+      ports:
+        - containerPort: 8080
+          name: http1
+          protocol: TCP
+  builtInAdapter:
+    modelLoadingTimeoutMillis: 90000
+---
+# RawDeployment InferenceService — KServe's "no knative, no service mesh" mode.
+# Migration §2.8 leaves RawDeployment ISVCs in place (the whole point of §2.8.7 is to
+# CONVERT Serverless/ModelMesh to this mode), but rhai-cli still scans them to report
+# impacted-workloads counts. Uses an OCI modelcar — common 2.25.4 pattern.
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: tinyllama-1b-cpu
+  namespace: ml-project-raw
+  annotations:
+    serving.kserve.io/deploymentMode: "RawDeployment"
+    openshift.io/display-name: tinyllama-1b-cpu
+  labels:
+    networking.knative.dev/visibility: cluster-local
+    opendatahub.io/dashboard: "true"
+spec:
+  predictor:
+    minReplicas: 1
+    maxReplicas: 1
+    automountServiceAccountToken: false
+    model:
+      modelFormat:
+        name: vLLM
+      name: ""
+      runtime: vllm-cpu
+      storageUri: oci://quay.io/rh-aiservices-bu/tinyllama:1.0
+      resources:
+        requests:
+          cpu: "2"
+          memory: 4Gi
+        limits:
+          cpu: "8"
+          memory: 8Gi

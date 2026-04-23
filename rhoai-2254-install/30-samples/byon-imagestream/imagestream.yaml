@@ -1,0 +1,44 @@
+---
+# BYON ("Bring Your Own Notebook") custom ImageStream in the applications namespace.
+# On long-lived 2.25.4 clusters these accumulate — users create them via the dashboard's
+# "Settings > Notebook images" page; they linger even after the Notebook they were created
+# for is deleted. Migration §2.6 / rhai-cli workbench-image scan must enumerate these.
+#
+# Labels / annotations match what the RHOAI dashboard emits:
+#   label  app.kubernetes.io/created-by: byon
+#   label  opendatahub.io/dashboard: "true"
+#   label  opendatahub.io/notebook-image: "true"
+#   annot  opendatahub.io/notebook-image-{creator,desc,name,url}
+#
+# Not referenced by any Notebook CR — that's the realistic "orphan IS" scenario.
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: custom-scipy-notebook
+  namespace: redhat-ods-applications
+  labels:
+    app.kubernetes.io/created-by: byon
+    opendatahub.io/dashboard: "true"
+    opendatahub.io/notebook-image: "true"
+  annotations:
+    opendatahub.io/notebook-image-creator: "rhoai-migration-test"
+    opendatahub.io/notebook-image-desc: "Upstream SciPy notebook (BYON migration sample)"
+    opendatahub.io/notebook-image-name: "Custom: SciPy (upstream)"
+    opendatahub.io/notebook-image-url: "quay.io/jupyter/scipy-notebook:lab-4.2.5"
+spec:
+  lookupPolicy:
+    local: true
+  tags:
+    - name: "lab-4.2.5"
+      annotations:
+        opendatahub.io/notebook-python-dependencies: "[]"
+        opendatahub.io/notebook-software: '[{"name":"JupyterLab","version":"4.2.5"}]'
+        opendatahub.io/workbench-image-recommended: "false"
+        openshift.io/imported-from: quay.io/jupyter/scipy-notebook:lab-4.2.5
+      from:
+        kind: DockerImage
+        name: quay.io/jupyter/scipy-notebook:lab-4.2.5
+      importPolicy:
+        importMode: Legacy
+      referencePolicy:
+        type: Source

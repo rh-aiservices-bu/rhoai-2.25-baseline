@@ -13,15 +13,17 @@ Everything lives under [rhoai-2254-install/](rhoai-2254-install/) and runs in fo
 | [05-gpu/](rhoai-2254-install/05-gpu/) | NFD + NVIDIA GPU Operator (auto-skipped if GPU capacity is already allocatable) |
 | [10-operators/](rhoai-2254-install/10-operators/) | Service Mesh v2, Serverless, Authorino, and the RHOAI 2.25.4 operator (pinned) |
 | [20-dsc/](rhoai-2254-install/20-dsc/) | `DSCInitialization` + `DataScienceCluster` — all components Managed, KServe in Serverless mode, ModelMesh Managed |
-| [30-samples/](rhoai-2254-install/30-samples/) | Flag-gated sample workloads covering every §2.x "Before upgrade" step: workbenches, KServe (serverless + modelmesh), LLM ISVC, Ray, KFTO, TrustyAI, AI Pipelines, Feature Store (Feast), Llama Stack, Model Registry |
+| [30-samples/](rhoai-2254-install/30-samples/) | Flag-gated sample workloads covering every §2.x "Before upgrade" step: workbenches (incl. a custom upstream Jupyter image), BYON orphan ImageStream, KServe (Serverless + ModelMesh + RawDeployment), LLM ISVC, Ray, KFTO, TrustyAI, AI Pipelines, Feature Store (Feast), Llama Stack, Model Registry |
 
 ## Prerequisites
 
-- An OpenShift cluster you are logged into (`oc whoami` works)
+- OpenShift **4.19.9 or newer** (hard requirement from migration guide §1.2)
+- Cluster pull secret with auth for `registry.redhat.io` — RHOAI, Service Mesh 2, Serverless, and NFD all pull from there. RHDP / sandbox clusters have this pre-wired; bare OCP installs need `oc set data secret/pull-secret -n openshift-config ...`
+- An OpenShift cluster you are logged into (`oc whoami` works) with cluster-admin
 - `oc`, `jq`, `envsubst` on your PATH
 - A default `StorageClass`
 
-The preflight check in [lib/common.sh](rhoai-2254-install/lib/common.sh) verifies all of the above before anything is applied.
+The preflight check in [lib/common.sh](rhoai-2254-install/lib/common.sh) verifies OCP login, default StorageClass, and tool presence before anything is applied.
 
 ## Usage
 
@@ -32,16 +34,21 @@ cd rhoai-2254-install
 ./install.sh
 ```
 
-Skip the GPU phase or individual sample workloads via environment variables (all default to `1`):
+Skip or override individual phases and samples via environment variables:
 
 ```sh
-INSTALL_GPU=0 \
 INSTALL_RAY=0 \
 INSTALL_TRUSTYAI=0 \
   ./install.sh
 ```
 
-Full list of sample flags is at the top of [30-samples/run.sh](rhoai-2254-install/30-samples/run.sh). If a single sample fails, the phase keeps going and the failed samples are reported at the end — rerun just that one with `./30-samples/<name>/run.sh`.
+Sample flags (`INSTALL_RAY`, `INSTALL_WORKBENCHES`, etc.) all default to `1`. Full list is at the top of [30-samples/run.sh](rhoai-2254-install/30-samples/run.sh). If a single sample fails, the phase keeps going and the failed samples are reported at the end — rerun just that one with `./30-samples/<name>/run.sh`.
+
+`INSTALL_GPU` is tri-state:
+
+- `auto` (default) — install NFD + NVIDIA GPU Operator only if no node has `nvidia.com/gpu` allocatable; skip otherwise. Safe to re-run.
+- `1` — force install even if drivers are already present
+- `0` — skip entirely
 
 Tear it all down (best-effort, reverse order):
 
@@ -50,6 +57,13 @@ Tear it all down (best-effort, reverse order):
 ```
 
 `uninstall.sh` does not remove cluster-wide CRDs — if you need a guaranteed-clean slate, reinstall against a fresh cluster.
+
+## Expected "not Ready" states
+
+A successful install leaves two workloads in non-Ready states on purpose — don't chase them:
+
+- **RStudio workbench** stays Stopped. The `rstudio-rhel9` ImageStream ships with no built tag; an admin has to run its BuildConfig (licensing dependency) before it can start. Realistic pre-migration state: the Notebook exists but isn't running.
+- **ModelMesh ISVC** (`my-modelmesh-isvc`) reports `Ready=False`. Its `storage-config` Secret points at a dummy S3 endpoint. Migration tooling only needs the ISVC + ServingRuntime to exist to detect them; actual model loading is out of scope.
 
 ## After the install
 

@@ -33,7 +33,7 @@ main() {
 
   log "=== sample namespaces ==="
   for ns in \
-      ml-project-a ml-project-b ml-project-c \
+      ml-project-a ml-project-b ml-project-c ml-project-raw \
       llm-project-a \
       raytest \
       pytorch-training \
@@ -47,6 +47,9 @@ main() {
       ; do
     delete_ns "$ns"
   done
+
+  log "=== BYON ImageStream ==="
+  oc -n redhat-ods-applications delete imagestream custom-scipy-notebook --ignore-not-found || true
 
   log "=== DSC + DSCI ==="
   oc delete dsc default-dsc --ignore-not-found --wait=false || true

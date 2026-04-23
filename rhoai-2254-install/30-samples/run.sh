@@ -9,8 +9,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/common.sh"
 
 : "${INSTALL_WORKBENCHES:=1}"       # §2.6
+: "${INSTALL_BYON_IMAGESTREAM:=1}"  # §2.6 — orphan BYON ImageStream pattern
 : "${INSTALL_KSERVE_SERVERLESS:=1}" # §2.8.7.1
 : "${INSTALL_KSERVE_MODELMESH:=1}"  # §2.8.7.2
+: "${INSTALL_KSERVE_RAW:=1}"        # §2.8 — RawDeployment scan path (no migration needed)
 : "${INSTALL_LLM_ISVC:=1}"          # §2.8.10
 : "${INSTALL_RAY:=1}"               # §2.7
 : "${INSTALL_KFTO:=1}"              # §2.9
@@ -44,10 +46,12 @@ run_sub "$INSTALL_LLAMA_STACK"       llama-stack
 run_sub "$INSTALL_PIPELINES"         pipelines
 run_sub "$INSTALL_TRUSTYAI"          trustyai
 run_sub "$INSTALL_WORKBENCHES"       workbenches
+run_sub "$INSTALL_BYON_IMAGESTREAM"  byon-imagestream
 run_sub "$INSTALL_RAY"               ray
 run_sub "$INSTALL_KFTO"              kfto
 run_sub "$INSTALL_KSERVE_MODELMESH"  kserve-modelmesh
 run_sub "$INSTALL_KSERVE_SERVERLESS" kserve-serverless
+run_sub "$INSTALL_KSERVE_RAW"        kserve-raw
 run_sub "$INSTALL_LLM_ISVC"          llm-isvc
 
 if ((${#FAILED_SAMPLES[@]} > 0)); then
