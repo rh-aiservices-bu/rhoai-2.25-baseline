@@ -17,7 +17,11 @@
       "Bash(awk '/^Events:/,0')",
       "Bash(awk '/^Status:/,0')",
       "Bash(oc logs *)",
-      "Bash(awk '/workbenches-\\(regular|hwp\\)/ {printf \"%-22s %-25s %s\\\\n\",$1,$2,$4}')"
+      "Bash(awk '/workbenches-\\(regular|hwp\\)/ {printf \"%-22s %-25s %s\\\\n\",$1,$2,$4}')",
+      "Bash(bash .claude/skills/rhoai-migrate-resolver/scripts/prereqs.sh)",
+      "Edit(/.claude/skills/rhoai-migrate-resolver/**)",
+      "Bash(oc exec *)",
+      "Bash(oc annotate *)"
     ]
   }
 }

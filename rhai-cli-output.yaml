@@ -1,0 +1,1138 @@
+clusterVersion: 2.25.4
+openShiftVersion: 4.20.18
+results:
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    operator.opendatahub.io/installed-version: cert-manager-operator.v1.19.0
+  group: dependency
+  kind: cert-manager
+  name: installed
+  spec:
+    description: Reports the cert-manager operator installation status and version
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-23T13:49:27Z"
+      message: 'cert-manager Operator for Red Hat OpenShift installed: cert-manager-operator.v1.19.0'
+      reason: ResourceFound
+      status: "True"
+      type: Available
+- group: dependency
+  kind: openshift-platform
+  name: version-requirement
+  spec:
+    description: Validates that OpenShift is at least version 4.19.9 when upgrading
+      to RHOAI 3.x
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-23T13:49:27Z"
+      message: OpenShift 4.20.18 meets RHOAI 3.3 minimum version requirement (4.19.9+)
+      reason: VersionCompatible
+      status: "True"
+      type: Compatible
+- group: dependency
+  kind: servicemesh-v3
+  name: installed
+  spec:
+    description: Validates that the required Service Mesh v3 version is available
+      to install from the cluster's operator catalog
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: Red Hat Service Mesh v3 (servicemeshoperator3.v3.1.0) is available
+        in the 'stable' channel of the 'redhat-operators' cluster catalog
+      reason: ResourceFound
+      status: "True"
+      type: Available
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+  group: platform
+  kind: dsc
+  name: readiness
+  spec:
+    description: Validates that DataScienceCluster is in Ready state
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: DataScienceCluster is ready
+      reason: ResourceAvailable
+      status: "True"
+      type: Ready
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+  group: platform
+  kind: dsci
+  name: readiness
+  spec:
+    description: Validates that DSCInitialization is in Ready state before upgrading
+      to RHOAI 3.x
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: DSCInitialization is ready
+      reason: ResourceAvailable
+      status: "True"
+      type: Ready
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    resource.opendatahub.io/crd-name: acceleratorprofiles.dashboard.opendatahub.io
+    workload.opendatahub.io/impacted-count: "1"
+  group: component
+  impactedObjects:
+  - apiVersion: dashboard.opendatahub.io/v1
+    kind: AcceleratorProfile
+    metadata:
+      name: migrated-gpu
+      namespace: redhat-ods-applications
+  kind: dashboard
+  name: acceleratorprofile-migration
+  spec:
+    description: Lists deprecated AcceleratorProfiles that will be auto-migrated to
+      HardwareProfiles (infrastructure.opendatahub.io) during upgrade
+  status:
+    conditions:
+    - impact: advisory
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: Found 1 deprecated AcceleratorProfile(s) that will be automatically
+        migrated to HardwareProfiles (infrastructure.opendatahub.io) during upgrade
+      reason: MigrationPending
+      remediation: Deprecated AcceleratorProfiles will be automatically migrated to
+        HardwareProfiles (infrastructure.opendatahub.io) during upgrade - no manual
+        action required
+      status: "False"
+      type: MigrationRequired
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    workload.opendatahub.io/impacted-count: "0"
+  group: component
+  kind: dashboard
+  name: hardwareprofile-migration
+  spec:
+    description: Lists legacy HardwareProfiles (opendatahub.io) that will be auto-migrated
+      to HardwareProfiles (infrastructure.opendatahub.io) during upgrade
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: No legacy HardwareProfiles found in opendatahub.io API group - no migration
+        required
+      reason: NoMigrationRequired
+      status: "True"
+      type: MigrationRequired
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    component.opendatahub.io/management-state: Managed
+  group: component
+  kind: datasciencepipelines
+  name: renaming
+  spec:
+    description: Informs about DataSciencePipelines component renaming to AIPipelines
+      in DSC v2 (RHOAI 3.x)
+  status:
+    conditions:
+    - impact: advisory
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: 'DataSciencePipelines component (state: Managed) will be renamed to
+        AIPipelines in DSC v2 (RHOAI 3.3). The field path changes from ''.spec.components.datasciencepipelines''
+        to ''.spec.components.aipipelines'''
+      reason: ComponentRenamed
+      remediation: No action required - the component will be automatically renamed.
+        Update any automation referencing '.spec.components.datasciencepipelines'
+        to use '.spec.components.aipipelines' after upgrade
+      status: "False"
+      type: Compatible
+- group: component
+  kind: kserve
+  name: authorino-tls-readiness
+  spec:
+    description: Validates that Authorino is configured with TLS and ready (required
+      for llm-d)
+  status:
+    conditions:
+    - impact: blocking
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: Authorino resource not found. Authorino with TLS must be installed
+        for llm-d
+      reason: ResourceNotFound
+      status: "False"
+      type: Ready
+- group: component
+  kind: kserve
+  name: kuadrant-readiness
+  spec:
+    description: Validates that the Kuadrant resource is present and ready (required
+      for llm-d)
+  status:
+    conditions:
+    - impact: blocking
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: Kuadrant resource not found. Kuadrant must be installed for llm-d
+      reason: ResourceNotFound
+      status: "False"
+      type: Ready
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    component.opendatahub.io/management-state: Managed
+  group: component
+  kind: kserve
+  name: serverless-removal
+  spec:
+    description: Validates that KServe serverless mode is disabled before upgrading
+      from RHOAI 2.x to 3.x (serverless support will be removed)
+  status:
+    conditions:
+    - impact: blocking
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: 'KServe serverless mode is enabled (state: Managed) but will be removed
+        in RHOAI 3.3'
+      reason: VersionIncompatible
+      remediation: Disable KServe serverless mode by setting serving.managementState
+        to 'Removed' in DataScienceCluster before upgrading
+      status: "False"
+      type: Compatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    operator.opendatahub.io/installed-version: servicemeshoperator.v2.6.14
+  group: component
+  kind: kserve
+  name: servicemesh-operator-upgrade
+  spec:
+    description: Validates that Service Mesh Operator v2 is not installed when upgrading
+      to RHOAI 3.x (no longer required, OpenShift 4.19+ handles service mesh internally)
+  status:
+    conditions:
+    - impact: advisory
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: Service Mesh Operator v2 (servicemeshoperator.v2.6.14) is installed
+        but no longer required by RHOAI 3.3 and should be removed. OpenShift 4.19+
+        handles service mesh internally
+      reason: VersionIncompatible
+      status: "False"
+      type: Compatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+  group: component
+  kind: kserve
+  name: servicemesh-removal
+  spec:
+    description: Validates that ServiceMesh is disabled before upgrading from RHOAI
+      2.x to 3.x (no longer required, OpenShift 4.19+ handles service mesh internally)
+  status:
+    conditions:
+    - impact: blocking
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: 'ServiceMesh is enabled (state: Managed) but is no longer required
+        by RHOAI 3.3. OpenShift 4.19+ handles service mesh internally'
+      reason: VersionIncompatible
+      remediation: Disable ServiceMesh by setting managementState to 'Removed' in
+        DSCInitialization before upgrading
+      status: "False"
+      type: Compatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    component.opendatahub.io/management-state: Managed
+  group: component
+  kind: kueue
+  name: management-state
+  spec:
+    description: Validates that Kueue managementState is Removed before upgrading
+      to RHOAI 3.x
+  status:
+    conditions:
+    - impact: blocking
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: The 3.3.2 upgrade currently only supports the Kueue managementState
+        of Removed. The Kueue managementState is currently Managed but no workloads
+        on the cluster are using Kueue. Set the Kueue managementState to Removed and
+        then re-run this script to proceed with migration.
+      reason: VersionIncompatible
+      status: "False"
+      type: Compatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    component.opendatahub.io/management-state: Managed
+  group: component
+  kind: modelmeshserving
+  name: removal
+  spec:
+    description: Validates that ModelMesh Serving is disabled before upgrading from
+      RHOAI 2.x to 3.x (component will be removed)
+  status:
+    conditions:
+    - impact: blocking
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: 'ModelMesh Serving is enabled (state: Managed) but will be removed
+        in RHOAI 3.3'
+      reason: VersionIncompatible
+      remediation: Disable ModelMesh Serving by setting managementState to 'Removed'
+        in DataScienceCluster before upgrading
+      status: "False"
+      type: Compatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    component.opendatahub.io/management-state: Managed
+  group: component
+  kind: ray
+  name: removal
+  spec:
+    description: Validates that the CodeFlare security layer is disabled before upgrading
+      from RHOAI 2.x to 3.x
+  status:
+    conditions:
+    - impact: blocking
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: 'CodeFlare is enabled (state: Managed) but will be removed in RHOAI
+        3.3'
+      reason: VersionIncompatible
+      remediation: Disable CodeFlare by setting managementState to 'Removed' in DataScienceCluster
+        before upgrading
+      status: "False"
+      type: Compatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    component.opendatahub.io/management-state: Managed
+  group: component
+  kind: trainingoperator
+  name: deprecation
+  spec:
+    description: Validates that TrainingOperator (Kubeflow Training Operator v1) deprecation
+      is acknowledged - will be replaced by Trainer v2 in future RHOAI releases
+  status:
+    conditions:
+    - impact: advisory
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: 'TrainingOperator (Kubeflow Training Operator v1) is enabled (state:
+        Managed) but is deprecated in RHOAI 3.3 and will be replaced by Trainer v2
+        in a future release'
+      reason: Deprecated
+      remediation: Plan migration from TrainingOperator (Kubeflow v1) to Trainer v2
+        in a future release
+      status: "False"
+      type: Compatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    component.opendatahub.io/management-state: Managed
+    workload.opendatahub.io/impacted-count: "0"
+  group: workload
+  kind: datasciencepipelines
+  name: instructlab-removal
+  spec:
+    description: Validates that DSPA objects do not use the removed InstructLab managedPipelines
+      field before upgrading to RHOAI 3.x
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: No DataSciencePipelinesApplications found using deprecated 'managedPipelines.instructLab'
+        field - ready for RHOAI 3.3 upgrade
+      reason: VersionCompatible
+      status: "True"
+      type: Compatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+  group: workload
+  kind: datasciencepipelines
+  name: stored-version-removal
+  spec:
+    description: Validates that the DataSciencePipelinesApplication CRD does not have
+      v1alpha1 in status.storedVersions before upgrading to RHOAI 3.x
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: No DataSciencePipelinesApplication resources using deprecated v1alpha1
+        API version - ready for RHOAI 3.3 upgrade
+      reason: VersionCompatible
+      status: "True"
+      type: Compatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    resource.opendatahub.io/crd-name: guardrailsorchestrators.trustyai.opendatahub.io
+    workload.opendatahub.io/impacted-count: "1"
+  group: workload
+  impactedObjects:
+  - apiVersion: trustyai.opendatahub.io/v1alpha1
+    kind: GuardrailsOrchestrator
+    metadata:
+      name: guardrails-orchestrator
+      namespace: test-guardrails-builtin-upgrade
+  kind: guardrails
+  name: config-migration
+  spec:
+    description: Detects GuardrailsOrchestrator CRs using deprecated otelExporter
+      configuration fields that need migration
+  status:
+    conditions:
+    - impact: advisory
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: Found 1 GuardrailsOrchestrator(s) using deprecated otelExporter fields
+        - migrate to new format before upgrading
+      reason: ConfigurationInvalid
+      status: "False"
+      type: OtelConfigCompatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    workload.opendatahub.io/impacted-count: "2"
+  group: workload
+  impactedObjects:
+  - apiVersion: trustyai.opendatahub.io/v1alpha1
+    kind: GuardrailsOrchestrator
+    metadata:
+      annotations:
+        guardrails.opendatahub.io/builtin-detectors: not enabled
+        guardrails.opendatahub.io/gateway-config: enableGuardrailsGateway not enabled;
+          guardrailsGatewayConfig not set
+        guardrails.opendatahub.io/orchestrator-configmap: orchestrator ConfigMap not
+          found
+      name: guardrails-orchestrator
+      namespace: test-guardrails-builtin-upgrade
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      annotations:
+        guardrails.opendatahub.io/issues: orchestrator ConfigMap not found
+      name: fms-orchestr8-config-nlp
+      namespace: test-guardrails-builtin-upgrade
+  kind: guardrails
+  name: impacted-workloads
+  spec:
+    description: Detects GuardrailsOrchestrator CRs with configuration that will be
+      impacted in RHOAI 3.x upgrade
+  status:
+    conditions:
+    - impact: advisory
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: Found 1 misconfigured GuardrailsOrchestrator(s)
+      reason: ConfigurationInvalid
+      remediation: Review and fix GuardrailsOrchestrator configuration before upgrading
+        to ensure correct operation in RHOAI 3.x
+      status: "False"
+      type: ConfigurationValid
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    workload.opendatahub.io/impacted-count: "0"
+  group: workload
+  kind: kserve
+  name: config-migration
+  spec:
+    description: Detects InferenceService CRs carrying the legacy opendatahub.io/legacy-hardware-profile-name
+      annotation that may need attention
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: No InferenceServices found with legacy hardware profile annotation
+        - no migration needed
+      reason: NoMigrationRequired
+      status: "True"
+      type: HardwareProfileCompatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    component.opendatahub.io/management-state: Managed
+  group: workload
+  kind: kserve
+  name: impacted-workloads
+  spec:
+    description: Validates that inferenceservice-config ConfigMap has opendatahub.io/managed=false
+      and includes hardware-profile annotations in serviceAnnotationDisallowedList
+      before upgrading to RHOAI 3.x
+  status:
+    conditions:
+    - impact: advisory
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: inferenceservice-config ConfigMap must have opendatahub.io/managed=false
+        and include hardware-profile annotations in serviceAnnotationDisallowedList,
+        otherwise models may get restarted during upgrade to RHOAI 3.3
+      reason: ConfigurationUnmanaged
+      remediation: Set the annotation opendatahub.io/managed=false on the inferenceservice-config
+        ConfigMap, and add opendatahub.io/hardware-profile-name and opendatahub.io/hardware-profile-namespace
+        to the serviceAnnotationDisallowedList in the inferenceService data key
+      status: "False"
+      type: Configured
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    workload.opendatahub.io/impacted-count: "0"
+  group: workload
+  kind: kserve
+  name: impacted-workloads
+  spec:
+    description: Detects InferenceService CRs referencing deprecated AcceleratorProfiles
+      that will be auto-migrated to HardwareProfiles (infrastructure.opendatahub.io)
+      during upgrade
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: No InferenceServices found using deprecated AcceleratorProfiles - no
+        migration needed
+      reason: VersionCompatible
+      status: "True"
+      type: AcceleratorProfileCompatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    workload.opendatahub.io/impacted-count: "4"
+  group: workload
+  impactedObjects:
+  - apiVersion: serving.kserve.io/v1beta1
+    kind: InferenceService
+    metadata:
+      annotations:
+        serving.kserve.io/deploymentMode: Serverless
+      name: my-serverless-isvc
+      namespace: ml-project-a
+  - apiVersion: serving.kserve.io/v1beta1
+    kind: InferenceService
+    metadata:
+      annotations:
+        serving.kserve.io/deploymentMode: Serverless
+      name: another-sl-model
+      namespace: ml-project-b
+  - apiVersion: serving.kserve.io/v1beta1
+    kind: InferenceService
+    metadata:
+      annotations:
+        serving.kserve.io/deploymentMode: ModelMesh
+      name: my-modelmesh-isvc
+      namespace: ml-project-c
+  - apiVersion: serving.kserve.io/v1alpha1
+    kind: ServingRuntime
+    metadata:
+      name: mlserver-1.x
+      namespace: ml-project-c
+  kind: kserve
+  name: impacted-workloads
+  spec:
+    description: Lists InferenceServices and ServingRuntimes using deprecated deployment
+      modes (ModelMesh, Serverless), removed ServingRuntimes, or ServingRuntimes referencing
+      deprecated AcceleratorProfiles that will be impacted in RHOAI 3.x
+  status:
+    conditions:
+    - impact: blocking
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: Found 2 Serverless InferenceService(s) - will be impacted in RHOAI
+        3.3
+      reason: VersionIncompatible
+      remediation: Migrate InferenceServices from Serverless/ModelMesh to RawDeployment
+        mode, update ServingRuntimes to supported versions, and review AcceleratorProfile
+        references before upgrading
+      status: "False"
+      type: ServerlessInferenceServicesCompatible
+    - impact: blocking
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: Found 1 ModelMesh InferenceService(s) - will be impacted in RHOAI 3.3
+      reason: VersionIncompatible
+      remediation: Migrate InferenceServices from Serverless/ModelMesh to RawDeployment
+        mode, update ServingRuntimes to supported versions, and review AcceleratorProfile
+        references before upgrading
+      status: "False"
+      type: ModelMeshInferenceServicesCompatible
+    - impact: blocking
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: Found 1 ModelMesh ServingRuntime(s) - will be impacted in RHOAI 3.3
+      reason: VersionIncompatible
+      remediation: Migrate InferenceServices from Serverless/ModelMesh to RawDeployment
+        mode, update ServingRuntimes to supported versions, and review AcceleratorProfile
+        references before upgrading
+      status: "False"
+      type: ModelMeshServingRuntimesCompatible
+    - lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: No InferenceService(s) using removed ServingRuntime(s) found - ready
+        for RHOAI 3.3 upgrade
+      reason: VersionCompatible
+      status: "True"
+      type: RemovedServingRuntimesCompatible
+    - lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: No ServingRuntime(s) with AcceleratorProfile annotation only found
+      reason: VersionCompatible
+      status: "True"
+      type: AcceleratorOnlyServingRuntimesCompatible
+    - lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: No ServingRuntime(s) with both AcceleratorProfile and HardwareProfile
+        annotations found
+      reason: VersionCompatible
+      status: "True"
+      type: AcceleratorAndHWProfileServingRuntimesCompatible
+    - lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: No InferenceService(s) referencing AcceleratorProfile-linked ServingRuntime(s)
+        found
+      reason: VersionCompatible
+      status: "True"
+      type: AcceleratorServingRuntimeISVCsCompatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    workload.opendatahub.io/impacted-count: "1"
+  group: workload
+  impactedObjects:
+  - apiVersion: llamastack.io/v1alpha1
+    kind: LlamaStackDistribution
+    metadata:
+      annotations:
+        upgrade.action: requires-recreation
+      name: lsd-llama-milvus-2323
+      namespace: ldap-user17-rag-225
+  kind: llamastackdistribution
+  name: config
+  spec:
+    description: Identifies LlamaStackDistribution resources that require deletion
+      and recreation for RHOAI 3.3 upgrade
+  status:
+    conditions:
+    - impact: blocking
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: Found 1 LlamaStackDistribution(s) that must be deleted and recreated
+        after RHOAI 3.3 upgrade. In-place upgrade is not supported. ALL DATA WILL
+        BE LOST - Archive data before upgrade.
+      reason: ArchitecturalIncompatibility
+      remediation: '1. Run backup script: llamastack/backup-all-llamastack.sh from
+        rhoai-upgrade-helpers repo to archive existing configurations. 2. Coordinate
+        with LLSD owners about data loss and recreation requirements. 3. After RHOAI
+        3.3 upgrade, delete old LLSDs and create new ones following RHOAI 3.3 documentation.'
+      status: "False"
+      type: RequiresRecreation
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    resource.opendatahub.io/crd-name: notebooks.kubeflow.org
+    workload.opendatahub.io/impacted-count: "0"
+  group: workload
+  kind: notebook
+  name: acceleratorprofile-migration
+  spec:
+    description: Detects Notebook (workbench) CRs referencing deprecated AcceleratorProfiles
+      that will be auto-migrated to HardwareProfiles (infrastructure.opendatahub.io)
+      during upgrade
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: No Notebooks found using deprecated AcceleratorProfiles - no migration
+        needed
+      reason: VersionCompatible
+      status: "True"
+      type: AcceleratorProfileCompatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    workload.opendatahub.io/impacted-count: "0"
+  group: workload
+  kind: notebook
+  name: config-migration
+  spec:
+    description: Detects Notebook CRs carrying the legacy opendatahub.io/legacy-hardware-profile-name
+      annotation that may need attention
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: No Notebooks found with legacy hardware profile annotation - no migration
+        needed
+      reason: NoMigrationRequired
+      status: "True"
+      type: HardwareProfileCompatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    workload.opendatahub.io/impacted-count: "0"
+  group: workload
+  kind: notebook
+  name: config-migration
+  spec:
+    description: Detects Dashboard-managed Notebook (workbench) CRs where the primary
+      container name does not match the Notebook CR name
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: No Notebooks found with container name mismatch
+      reason: ConfigurationValid
+      status: "True"
+      type: ContainerNameValid
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    resource.opendatahub.io/crd-name: notebooks.kubeflow.org
+    workload.opendatahub.io/impacted-count: "0"
+  group: workload
+  kind: notebook
+  name: data-integrity
+  spec:
+    description: Verifies that Notebooks referencing connections have backing Secrets
+      that exist on the cluster
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: All Notebook connections reference existing Secrets
+      reason: RequirementsMet
+      status: "True"
+      type: ConnectionIntegrity
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    resource.opendatahub.io/crd-name: notebooks.kubeflow.org
+    workload.opendatahub.io/impacted-count: "0"
+  group: workload
+  kind: notebook
+  name: data-integrity
+  spec:
+    description: Verifies that Notebooks referencing infrastructure HardwareProfiles
+      point to profiles that exist on the cluster
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: All Notebooks reference existing HardwareProfiles
+      reason: RequirementsMet
+      status: "True"
+      type: HardwareProfileIntegrity
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    resource.opendatahub.io/crd-name: notebooks.kubeflow.org
+    workload.opendatahub.io/impacted-count: "5"
+  group: workload
+  impactedObjects:
+  - apiVersion: kubeflow.org/v1
+    kind: Notebook
+    metadata:
+      annotations:
+        check.opendatahub.io/image-ref: image-registry.openshift-image-registry.svc:5000/redhat-ods-applications/code-server-notebook:2025.1
+        check.opendatahub.io/image-status: PRE_UPGRADE_ACTION_REQUIRED
+        check.opendatahub.io/reason: 'codeserver-2025-1: codeserver image with tag
+          2025.1 (< 2025.2, lacks nginx fix)'
+      name: codeserver-2025-1
+      namespace: workbenches-regular
+  - apiVersion: kubeflow.org/v1
+    kind: Notebook
+    metadata:
+      annotations:
+        check.opendatahub.io/image-ref: quay.io/jupyter/scipy-notebook:lab-4.2.5
+        check.opendatahub.io/image-status: CUSTOM
+        check.opendatahub.io/reason: Image 'scipy-notebook' is not a recognized OOTB
+          notebook image
+      name: custom
+      namespace: workbenches-regular
+  kind: notebook
+  name: impacted-workloads
+  spec:
+    description: Identifies Notebook (workbench) instances with images that will not
+      work in RHOAI 3.x
+  status:
+    conditions:
+    - impact: advisory
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: |-
+        Found 5 Notebook(s) using 4 unique images:
+          - 2 compatible (1 images, OOTB ready for 3.3)
+          - 1 custom (1 images, user verification needed)
+          - 1 incompatible (1 images, update recommended before upgrade)
+          - 0 incompatible (0 images, must rebuild after upgrade to 3.x)
+          - 1 unverified (1 images, could not determine status)
+      reason: WorkloadsImpacted
+      remediation: Update workbenches with incompatible images to use 2025.2+ versions
+        before upgrading
+      status: "False"
+      type: NotebooksCompatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    resource.opendatahub.io/crd-name: notebooks.kubeflow.org
+    workload.opendatahub.io/impacted-count: "4"
+  group: workload
+  impactedObjects:
+  - apiVersion: kubeflow.org/v1
+    kind: Notebook
+    metadata:
+      annotations:
+        check.opendatahub.io/container-state: running
+      name: jupyter-2025-1
+      namespace: workbenches-hwp
+  - apiVersion: kubeflow.org/v1
+    kind: Notebook
+    metadata:
+      annotations:
+        check.opendatahub.io/container-state: running
+      name: codeserver-2025-1
+      namespace: workbenches-regular
+  - apiVersion: kubeflow.org/v1
+    kind: Notebook
+    metadata:
+      annotations:
+        check.opendatahub.io/container-state: running
+      name: custom
+      namespace: workbenches-regular
+  - apiVersion: kubeflow.org/v1
+    kind: Notebook
+    metadata:
+      annotations:
+        check.opendatahub.io/container-state: running
+      name: jupyter-2025-1
+      namespace: workbenches-regular
+  kind: notebook
+  name: workload-state
+  spec:
+    description: Detects Notebook CRs that are not stopped on the cluster
+  status:
+    conditions:
+    - impact: advisory
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: |-
+        Found 4 non-stopped Notebook(s):
+          - 4 running (should be stopped before upgrade)
+      reason: WorkloadsImpacted
+      remediation: Save all pending work in running Notebooks, then stop them before
+        upgrading
+      status: "False"
+      type: NonStoppedWorkloads
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    workload.opendatahub.io/impacted-count: "2"
+  group: workload
+  impactedObjects:
+  - apiVersion: ray.io/v1
+    kind: RayCluster
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/last-applied-configuration: |
+          {"apiVersion":"ray.io/v1","kind":"RayCluster","metadata":{"annotations":{},"labels":{"controller-tools.k8s.io":"1.0"},"name":"comprehensive-mixed","namespace":"raytest"},"spec":{"headGroupSpec":{"rayStartParams":{"block":"true","dashboard-host":"0.0.0.0"},"template":{"spec":{"containers":[{"image":"quay.io/modh/ray@sha256:0d715f92570a2997381b7cafc0e224cfa25323f18b9545acfd23bc2b71576d06","imagePullPolicy":"IfNotPresent","name":"ray-head","ports":[{"containerPort":6379,"name":"gcs-server"},{"containerPort":8265,"name":"dashboard"},{"containerPort":10001,"name":"client"}],"resources":{"limits":{"cpu":"2","memory":"4Gi"},"requests":{"cpu":"1","memory":"2Gi"}}}]}}},"rayVersion":"2.47.1","workerGroupSpecs":[{"groupName":"small-group","maxReplicas":2,"minReplicas":2,"rayStartParams":{"block":"true"},"replicas":2,"template":{"spec":{"containers":[{"image":"quay.io/modh/ray@sha256:0d715f92570a2997381b7cafc0e224cfa25323f18b9545acfd23bc2b71576d06","imagePullPolicy":"IfNotPresent","name":"ray-worker","resources":{"limits":{"cpu":"2","memory":"4Gi"},"requests":{"cpu":"1","memory":"2Gi"}}}]}}}]}}
+        ray.openshift.ai/version: UNKNOWN
+      creationTimestamp: "2026-04-22T21:23:09Z"
+      finalizers:
+      - ray.openshift.ai/oauth-finalizer
+      generation: 2
+      labels:
+        controller-tools.k8s.io: "1.0"
+      managedFields:
+      - apiVersion: ray.io/v1
+        fieldsType: FieldsV1
+        fieldsV1:
+          f:metadata:
+            f:finalizers:
+              .: {}
+              v:"ray.openshift.ai/oauth-finalizer": {}
+        manager: codeflare-operator
+        operation: Update
+        time: "2026-04-22T21:23:09Z"
+      - apiVersion: ray.io/v1
+        fieldsType: FieldsV1
+        fieldsV1:
+          f:metadata:
+            f:annotations:
+              .: {}
+              f:kubectl.kubernetes.io/last-applied-configuration: {}
+            f:labels:
+              .: {}
+              f:controller-tools.k8s.io: {}
+          f:spec:
+            .: {}
+            f:headGroupSpec:
+              .: {}
+              f:rayStartParams:
+                .: {}
+                f:block: {}
+                f:dashboard-host: {}
+              f:template:
+                .: {}
+                f:spec:
+                  .: {}
+                  f:containers:
+                    .: {}
+                    k:{"name":"ray-head"}:
+                      .: {}
+                      f:image: {}
+                      f:imagePullPolicy: {}
+                      f:name: {}
+                      f:ports:
+                        .: {}
+                        k:{"containerPort":6379,"protocol":"TCP"}:
+                          .: {}
+                          f:containerPort: {}
+                          f:name: {}
+                          f:protocol: {}
+                        k:{"containerPort":8265,"protocol":"TCP"}:
+                          .: {}
+                          f:containerPort: {}
+                          f:name: {}
+                          f:protocol: {}
+                        k:{"containerPort":10001,"protocol":"TCP"}:
+                          .: {}
+                          f:containerPort: {}
+                          f:name: {}
+                          f:protocol: {}
+                      f:resources:
+                        .: {}
+                        f:limits:
+                          .: {}
+                          f:cpu: {}
+                          f:memory: {}
+                        f:requests:
+                          .: {}
+                          f:cpu: {}
+                          f:memory: {}
+            f:rayVersion: {}
+            f:workerGroupSpecs: {}
+        manager: kubectl-client-side-apply
+        operation: Update
+        time: "2026-04-22T21:23:09Z"
+      - apiVersion: ray.io/v1
+        fieldsType: FieldsV1
+        fieldsV1:
+          f:status:
+            .: {}
+            f:availableWorkerReplicas: {}
+            f:conditions:
+              .: {}
+              k:{"type":"HeadPodReady"}:
+                .: {}
+                f:lastTransitionTime: {}
+                f:message: {}
+                f:reason: {}
+                f:status: {}
+                f:type: {}
+              k:{"type":"RayClusterProvisioned"}:
+                .: {}
+                f:lastTransitionTime: {}
+                f:message: {}
+                f:reason: {}
+                f:status: {}
+                f:type: {}
+              k:{"type":"RayClusterSuspended"}:
+                .: {}
+                f:lastTransitionTime: {}
+                f:message: {}
+                f:reason: {}
+                f:status: {}
+                f:type: {}
+              k:{"type":"RayClusterSuspending"}:
+                .: {}
+                f:lastTransitionTime: {}
+                f:message: {}
+                f:reason: {}
+                f:status: {}
+                f:type: {}
+            f:desiredCPU: {}
+            f:desiredGPU: {}
+            f:desiredMemory: {}
+            f:desiredTPU: {}
+            f:desiredWorkerReplicas: {}
+            f:endpoints:
+              .: {}
+              f:client: {}
+              f:dashboard: {}
+              f:gcs-server: {}
+              f:metrics: {}
+            f:head:
+              .: {}
+              f:podIP: {}
+              f:podName: {}
+              f:serviceIP: {}
+              f:serviceName: {}
+            f:lastUpdateTime: {}
+            f:maxWorkerReplicas: {}
+            f:minWorkerReplicas: {}
+            f:observedGeneration: {}
+            f:readyWorkerReplicas: {}
+            f:state: {}
+            f:stateTransitionTimes:
+              .: {}
+              f:ready: {}
+        manager: kuberay-operator
+        operation: Update
+        subresource: status
+        time: "2026-04-23T13:05:05Z"
+      name: comprehensive-mixed
+      namespace: raytest
+      resourceVersion: "274455"
+      uid: 95f4ed44-bc9f-4380-88fd-0f2d3b2e3fca
+  - apiVersion: ray.io/v1
+    kind: RayCluster
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/last-applied-configuration: |
+          {"apiVersion":"ray.io/v1","kind":"RayCluster","metadata":{"annotations":{},"name":"sdk-configurations","namespace":"raytest"},"spec":{"headGroupSpec":{"rayStartParams":{"block":"true","dashboard-host":"0.0.0.0"},"template":{"spec":{"containers":[{"image":"quay.io/modh/ray@sha256:0d715f92570a2997381b7cafc0e224cfa25323f18b9545acfd23bc2b71576d06","imagePullPolicy":"IfNotPresent","name":"ray-head","ports":[{"containerPort":6379,"name":"gcs-server"},{"containerPort":8265,"name":"dashboard"},{"containerPort":10001,"name":"client"}],"resources":{"limits":{"cpu":"2","memory":"4Gi"},"requests":{"cpu":"1","memory":"2Gi"}}}]}}},"rayVersion":"2.47.1","workerGroupSpecs":[{"groupName":"small-group","maxReplicas":1,"minReplicas":1,"rayStartParams":{"block":"true"},"replicas":1,"template":{"spec":{"containers":[{"image":"quay.io/modh/ray@sha256:0d715f92570a2997381b7cafc0e224cfa25323f18b9545acfd23bc2b71576d06","imagePullPolicy":"IfNotPresent","name":"ray-worker","resources":{"limits":{"cpu":"2","memory":"4Gi"},"requests":{"cpu":"1","memory":"2Gi"}}}]}}}]}}
+        ray.openshift.ai/version: UNKNOWN
+      creationTimestamp: "2026-04-22T21:23:10Z"
+      finalizers:
+      - ray.openshift.ai/oauth-finalizer
+      generation: 2
+      managedFields:
+      - apiVersion: ray.io/v1
+        fieldsType: FieldsV1
+        fieldsV1:
+          f:metadata:
+            f:finalizers:
+              .: {}
+              v:"ray.openshift.ai/oauth-finalizer": {}
+        manager: codeflare-operator
+        operation: Update
+        time: "2026-04-22T21:23:10Z"
+      - apiVersion: ray.io/v1
+        fieldsType: FieldsV1
+        fieldsV1:
+          f:metadata:
+            f:annotations:
+              .: {}
+              f:kubectl.kubernetes.io/last-applied-configuration: {}
+          f:spec:
+            .: {}
+            f:headGroupSpec:
+              .: {}
+              f:rayStartParams:
+                .: {}
+                f:block: {}
+                f:dashboard-host: {}
+              f:template:
+                .: {}
+                f:spec:
+                  .: {}
+                  f:containers:
+                    .: {}
+                    k:{"name":"ray-head"}:
+                      .: {}
+                      f:image: {}
+                      f:imagePullPolicy: {}
+                      f:name: {}
+                      f:ports:
+                        .: {}
+                        k:{"containerPort":6379,"protocol":"TCP"}:
+                          .: {}
+                          f:containerPort: {}
+                          f:name: {}
+                          f:protocol: {}
+                        k:{"containerPort":8265,"protocol":"TCP"}:
+                          .: {}
+                          f:containerPort: {}
+                          f:name: {}
+                          f:protocol: {}
+                        k:{"containerPort":10001,"protocol":"TCP"}:
+                          .: {}
+                          f:containerPort: {}
+                          f:name: {}
+                          f:protocol: {}
+                      f:resources:
+                        .: {}
+                        f:limits:
+                          .: {}
+                          f:cpu: {}
+                          f:memory: {}
+                        f:requests:
+                          .: {}
+                          f:cpu: {}
+                          f:memory: {}
+            f:rayVersion: {}
+            f:workerGroupSpecs: {}
+        manager: kubectl-client-side-apply
+        operation: Update
+        time: "2026-04-22T21:23:10Z"
+      - apiVersion: ray.io/v1
+        fieldsType: FieldsV1
+        fieldsV1:
+          f:status:
+            .: {}
+            f:availableWorkerReplicas: {}
+            f:conditions:
+              .: {}
+              k:{"type":"HeadPodReady"}:
+                .: {}
+                f:lastTransitionTime: {}
+                f:message: {}
+                f:reason: {}
+                f:status: {}
+                f:type: {}
+              k:{"type":"RayClusterProvisioned"}:
+                .: {}
+                f:lastTransitionTime: {}
+                f:message: {}
+                f:reason: {}
+                f:status: {}
+                f:type: {}
+              k:{"type":"RayClusterSuspended"}:
+                .: {}
+                f:lastTransitionTime: {}
+                f:message: {}
+                f:reason: {}
+                f:status: {}
+                f:type: {}
+              k:{"type":"RayClusterSuspending"}:
+                .: {}
+                f:lastTransitionTime: {}
+                f:message: {}
+                f:reason: {}
+                f:status: {}
+                f:type: {}
+            f:desiredCPU: {}
+            f:desiredGPU: {}
+            f:desiredMemory: {}
+            f:desiredTPU: {}
+            f:desiredWorkerReplicas: {}
+            f:endpoints:
+              .: {}
+              f:client: {}
+              f:dashboard: {}
+              f:gcs-server: {}
+              f:metrics: {}
+            f:head:
+              .: {}
+              f:podIP: {}
+              f:podName: {}
+              f:serviceIP: {}
+              f:serviceName: {}
+            f:lastUpdateTime: {}
+            f:maxWorkerReplicas: {}
+            f:minWorkerReplicas: {}
+            f:observedGeneration: {}
+            f:readyWorkerReplicas: {}
+            f:state: {}
+            f:stateTransitionTimes:
+              .: {}
+              f:ready: {}
+        manager: kuberay-operator
+        operation: Update
+        subresource: status
+        time: "2026-04-23T13:05:06Z"
+      name: sdk-configurations
+      namespace: raytest
+      resourceVersion: "274527"
+      uid: 3f22dcfd-5221-4f4d-9dd8-31f47b588ee2
+  kind: ray
+  name: impacted-workloads
+  spec:
+    description: Lists RayClusters managed by CodeFlare that will be impacted in RHOAI
+      3.x (CodeFlare not available)
+  status:
+    conditions:
+    - impact: advisory
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: Found 2 CodeFlare-managed RayCluster(s) which have not had pre-upgrade
+        steps completed, not ready for RHOAI 3.3 upgrade
+      reason: VersionIncompatible
+      remediation: Delete or back up CodeFlare-managed RayClusters before upgrading,
+        as CodeFlare will not be available in RHOAI 3.x
+      status: "False"
+      type: CodeFlareRayClustersCompatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    workload.opendatahub.io/impacted-count: "0"
+  group: workload
+  kind: ray
+  name: impacted-workloads
+  spec:
+    description: Lists AppWrappers managed by CodeFlare that will be impacted in RHOAI
+      3.x
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: No AppWrapper(s) found - ready for RHOAI 3.3 upgrade
+      reason: VersionCompatible
+      status: "True"
+      type: AppWrapperCompatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    resource.opendatahub.io/crd-name: pytorchjobs.kubeflow.org
+    workload.opendatahub.io/impacted-count: "1"
+  group: workload
+  impactedObjects:
+  - apiVersion: kubeflow.org/v1
+    kind: PyTorchJob
+    metadata:
+      name: pytorch-distributed-training
+      namespace: pytorch-training
+  kind: trainingoperator
+  name: impacted-workloads
+  spec:
+    description: Lists PyTorchJobs using deprecated TrainingOperator (Kubeflow v1)
+      that will be impacted by transition to Trainer v2
+  status:
+    conditions:
+    - impact: advisory
+      lastTransitionTime: "2026-04-23T13:49:28Z"
+      message: Found 1 active PyTorchJob(s) - workloads use deprecated TrainingOperator
+        (Kubeflow v1) which will be replaced by Trainer v2
+      reason: WorkloadsImpacted
+      remediation: Complete or delete active PyTorchJobs before upgrading; plan migration
+        to Trainer v2 API
+      status: "False"
+      type: PyTorchJobsCompatible
+targetVersion: 3.3.2

@@ -67,5 +67,38 @@ A successful install leaves two workloads in non-Ready states on purpose — don
 
 ## After the install
 
-1. Run the migration assessment from chapter 1 of the migration guide.
-2. Walk through chapter 2 (§2.x steps) to upgrade 2.25.4 → 3.3.2 against the workloads this repo deployed.
+1. Run the migration assessment from chapter 1 of the migration guide (`rhai-cli lint --target-version 3.3.2`).
+2. Walk through chapter 2 (§2.x steps) to resolve every blocker — the [rhoai-migrate-resolver](.claude/skills/rhoai-migrate-resolver/) skill below guides you through this step-by-step.
+3. Proceed to chapter 3 of the migration guide once the readiness validation is clean.
+
+## Resolving migration blockers (Claude Code skill)
+
+A Claude Code skill, [rhoai-migrate-resolver](.claude/skills/rhoai-migrate-resolver/), walks a cluster administrator through resolving every blocker `rhai-cli` reports. The skill is **read-only on the cluster** — it recommends `oc` commands and explains *why* each change is needed (citing [architectural-changes.md](architectural-changes.md)) but never executes mutations itself.
+
+### Use the skill inside Claude Code
+
+Open this project in Claude Code, then:
+
+```
+/rhoai-migrate-resolver
+```
+
+Claude will ask for the `rhai-cli` output (file path or pasted table), parse the `prohibited` / `critical` rows, and walk you through one resolver at a time.
+
+### Or run the two helper scripts directly
+
+Both scripts are self-contained bash — no Claude Code required — and only use read-only `oc get` / `oc describe`:
+
+```sh
+# Before you start — are the platform prerequisites met? (OCP version, pull secret, StorageClass, DSC present)
+bash .claude/skills/rhoai-migrate-resolver/scripts/prereqs.sh
+
+# After all migration prep — is every §2.x blocker resolved?
+bash .claude/skills/rhoai-migrate-resolver/scripts/validate.sh
+```
+
+Exit `0` means all checks pass; `1` means at least one FAIL. Run `validate.sh` *with* `rhai-cli lint`, not instead of it — they cross-check each other.
+
+### What the skill covers
+
+Each resolver under [.claude/skills/rhoai-migrate-resolver/resolvers/](.claude/skills/rhoai-migrate-resolver/resolvers/) maps a class of `rhai-cli` output rows to a fix. See [resolvers/README.md](.claude/skills/rhoai-migrate-resolver/resolvers/README.md) for the full `(GROUP, KIND, CHECK) → resolver` mapping. Coverage spans every migration path the install script deliberately creates — Kueue removal, KServe Serverless/ModelMesh conversion, Service Mesh 2 / Serverless / standalone Authorino uninstall, workbench image rebuilds, TrustyAI + Ray + Llama Stack backups, LLMInferenceService template pinning, and more.
