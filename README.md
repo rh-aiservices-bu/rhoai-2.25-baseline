@@ -44,6 +44,22 @@ INSTALL_TRUSTYAI=0 \
 
 Sample flags (`INSTALL_RAY`, `INSTALL_WORKBENCHES`, etc.) all default to `1`. Full list is at the top of [30-samples/run.sh](rhoai-2254-install/30-samples/run.sh). If a single sample fails, the phase keeps going and the failed samples are reported at the end — rerun just that one with `./30-samples/<name>/run.sh`.
 
+### Reproducing a customer cluster from an rhai-cli assessment
+
+`install-from-assessment.sh` takes an `rhai-cli lint --output yaml` assessment file and runs `install.sh` with matching env vars — useful for building a test cluster that would yield a similar assessment report (same migration issues and blockers), so you can rehearse the migration against a representative shape without exact customer data.
+
+```sh
+cd rhoai-2254-install
+./install-from-assessment.sh path/to/rhai-cli-output.yaml --dry-run   # see what it will do
+./install-from-assessment.sh path/to/rhai-cli-output.yaml             # run it
+```
+
+The wrapper prints the derived `INSTALL_*` and `DSC_*_STATE` env vars before handing off to `install.sh`. See [examples/rhoai-upgrade.yml](rhoai-2254-install/examples/rhoai-upgrade.yml) for a sample input.
+
+**What it reproduces:** per-operator install toggles (SM v2 / Serverless / Authorino), DSC/DSCI component management states, and per-sample-family enable/disable (if no Ray workloads on the source cluster, no Ray samples installed on the target).
+
+**What it does NOT reproduce** (Tier 1 limitations): exact namespace names, specific model storage URIs, deprecated-schema-field injection (e.g. DSPA `.spec.apiServer.managedPipelines.instructLab`). The wrapper prints a "cannot reproduce" summary at the end listing any such issues from the source assessment.
+
 `INSTALL_GPU` is tri-state; all samples are CPU-only so GPU is opt-in:
 
 - `0` (default) — skip the GPU operator phase entirely.

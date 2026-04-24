@@ -1,10 +1,23 @@
 ---
-# Pre-migration DataScienceCluster.
-# Every component is Managed so the migration has something to operate on.
-# KServe is in Serverless mode (the "difficult" path) — migration §2.8 will convert
-# InferenceServices to RawDeployment and set kserve.serving.managementState=Removed.
-# ModelMesh is Managed — migration §2.8.9 sets it to Removed.
-# Kueue is Managed with the embedded distribution — migration §2.2 sets it to Removed.
+# Pre-migration DataScienceCluster. Rendered through envsubst so the fields the
+# migration toggles between 2.x and 3.x states can be overridden by the assessment
+# wrapper. Defaults reproduce the full "pre-migration" state used by install.sh.
+#
+# Overridable env vars (all optional; defaults shown):
+#   DSC_KSERVE_MANAGEMENT_STATE=Managed
+#   DSC_KSERVE_DEFAULT_MODE=Serverless
+#   DSC_KSERVE_SERVING_STATE=Managed
+#   DSC_MODELMESH_STATE=Managed
+#   DSC_KUEUE_STATE=Managed
+#   DSC_WORKBENCHES_STATE=Managed
+#   DSC_RAY_STATE=Managed
+#   DSC_CODEFLARE_STATE=Managed
+#   DSC_TRAININGOPERATOR_STATE=Managed
+#   DSC_TRUSTYAI_STATE=Managed
+#   DSC_DATASCIENCEPIPELINES_STATE=Managed
+#   DSC_MODELREGISTRY_STATE=Managed
+#   DSC_FEASTOPERATOR_STATE=Managed
+#   DSC_LLAMASTACK_STATE=Managed
 apiVersion: datasciencecluster.opendatahub.io/v1
 kind: DataScienceCluster
 metadata:
@@ -14,16 +27,16 @@ metadata:
 spec:
   components:
     codeflare:
-      managementState: Managed
+      managementState: ${DSC_CODEFLARE_STATE}
     dashboard:
       managementState: Managed
     datasciencepipelines:
-      managementState: Managed
+      managementState: ${DSC_DATASCIENCEPIPELINES_STATE}
     kserve:
-      managementState: Managed
-      defaultDeploymentMode: Serverless
+      managementState: ${DSC_KSERVE_MANAGEMENT_STATE}
+      defaultDeploymentMode: ${DSC_KSERVE_DEFAULT_MODE}
       serving:
-        managementState: Managed
+        managementState: ${DSC_KSERVE_SERVING_STATE}
         name: knative-serving
         ingressGateway:
           certificate:
@@ -31,21 +44,21 @@ spec:
       nim:
         managementState: Managed
     kueue:
-      managementState: Managed
+      managementState: ${DSC_KUEUE_STATE}
     modelmeshserving:
-      managementState: Managed
+      managementState: ${DSC_MODELMESH_STATE}
     modelregistry:
-      managementState: Managed
+      managementState: ${DSC_MODELREGISTRY_STATE}
       registriesNamespace: rhoai-model-registries
     ray:
-      managementState: Managed
+      managementState: ${DSC_RAY_STATE}
     trainingoperator:
-      managementState: Managed
+      managementState: ${DSC_TRAININGOPERATOR_STATE}
     trustyai:
-      managementState: Managed
+      managementState: ${DSC_TRUSTYAI_STATE}
     workbenches:
-      managementState: Managed
+      managementState: ${DSC_WORKBENCHES_STATE}
     feastoperator:
-      managementState: Managed
+      managementState: ${DSC_FEASTOPERATOR_STATE}
     llamastackoperator:
-      managementState: Managed
+      managementState: ${DSC_LLAMASTACK_STATE}

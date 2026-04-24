@@ -20,7 +20,7 @@ RHCL replaces the standalone Authorino operator and becomes the auth/policy cont
 
 1. Install Red Hat Connectivity Link (§2.8.10.1 of the migration guide)
 2. For disconnected clusters, mirror the RHCL images (§2.8.10.2)
-3. Configure `AuthPolicy` for each LLMInferenceService (§2.8.10.3)
+3. Configure authentication for each LLMInferenceService — annotation or RBAC (§2.8.10.3)
 4. Freeze LLMInferenceService template annotations (§2.8.10.4)
 
 ### 1. Install Red Hat Connectivity Link
@@ -170,65 +170,122 @@ If this is a disconnected cluster, mirror the RHCL images into your registry usi
 
 ### 3. Configure authentication for each LLMInferenceService
 
-For each LLMInferenceService, create an `AuthPolicy` that tells RHCL how to authenticate callers. Minimal example using bearer tokens issued by the OCP OAuth server:
+> **Not Kuadrant `AuthPolicy`.** An earlier version of this resolver recommended creating a `kuadrant.io/v1* AuthPolicy` with `targetRef.kind: LLMInferenceService`. The RHCL webhook rejects that — AuthPolicy only accepts `group: gateway.networking.k8s.io` with `kind: HTTPRoute` or `Gateway`. Per migration guide §2.8.10.3, LLMInferenceService authentication is configured via annotation (dev/test) or plain Kubernetes RBAC (recommended). Both paths below are documented by Red Hat and work pre-upgrade.
+
+Pick **one** of the following methods per LLMInferenceService.
+
+#### Method 1 — Disable auth (dev/test only)
+
+Fastest path. Makes the model reachable with no token. Not for production.
+
+```
+NS=<llm-namespace>; NAME=<llm-isvc-name>
+oc annotate llminferenceservice "$NAME" -n "$NS" \
+  security.opendatahub.io/enable-auth=false --overwrite
+```
+
+Verify:
+
+```
+oc get llminferenceservice "$NAME" -n "$NS" -o jsonpath='{.metadata.annotations.security\.opendatahub\.io/enable-auth}'; echo
+# expect: false
+```
+
+#### Method 2 — RBAC with ServiceAccount + Role + RoleBinding (recommended)
+
+Keeps the model secure. Clients authenticate with a bearer token minted for the ServiceAccount.
 
 ```
 NS=<llm-namespace>; NAME=<llm-isvc-name>
 oc apply -f - <<EOF
-apiVersion: kuadrant.io/v1beta2
-kind: AuthPolicy
+apiVersion: v1
+kind: ServiceAccount
 metadata:
-  name: ${NAME}-auth
+  name: ${NAME}-sa
   namespace: ${NS}
-spec:
-  targetRef:
-    group: serving.kserve.io
-    kind: LLMInferenceService
-    name: ${NAME}
-  rules:
-    authentication:
-      openshift-oauth:
-        kubernetesTokenReview: {}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ${NAME}-role
+  namespace: ${NS}
+rules:
+  - apiGroups: ["serving.kserve.io"]
+    resources: ["llminferenceservices"]
+    resourceNames: ["${NAME}"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ${NAME}-rolebinding
+  namespace: ${NS}
+subjects:
+  - kind: ServiceAccount
+    name: ${NAME}-sa
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ${NAME}-role
 EOF
 ```
 
-> **apiVersion:** confirm the served version on your cluster before applying — it changes between RHCL releases. RHCL 1.3.x serves `kuadrant.io/v1beta2` as the AuthPolicy storage version. Verify with:
-> ```
-> oc get crd authpolicies.kuadrant.io -o jsonpath='{range .spec.versions[?(@.storage==true)]}{.name}{end}'; echo
-> ```
-> If the output says `v1`, use `apiVersion: kuadrant.io/v1` instead.
+Clients then include a bearer token:
 
-Replace with your real auth scheme (external OIDC, API keys, etc.). The exact shape depends on RHCL version and your IdP.
+```
+TOKEN=$(oc create token "${NAME}-sa" -n "$NS")
+curl -H "Authorization: Bearer $TOKEN" https://<model-url>/v2/models/...
+```
+
+> **Why this isn't Kuadrant/AuthPolicy on 2.x:** on the pre-upgrade 2.25.4 cluster, LLMInferenceService routes through Service Mesh v2 + Knative, not Gateway API — there are no HTTPRoutes/Gateways for AuthPolicy to target. Gateway API-based auth is a 3.x-era concern handled post-upgrade. The RBAC path here works on both 2.25.4 pre-upgrade and 3.3.2 post-upgrade.
 
 ### 4. Freeze the LLMInferenceService template annotations
 
-Pin every LLMInferenceService to the 2.25 template set. Enumerate:
+Pin every LLMInferenceService to the 2.25.4 template set so the chapter-3 upgrade doesn't rewrite templates under a running scheduler. The pins go on `.status.annotations` (via the status subresource), **not** `.metadata.annotations` — and the values are the literal `kserve-config-llm-*` strings the 2.25 scheduler reads, not version labels.
+
+Enumerate:
 
 ```
-oc get llminferenceservice -A -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name'
+oc get llmisvc -A -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name'
 ```
 
-For each, add the freeze annotations. Use the rhai-cli helper if it's available in your image:
-
-```
-oc exec -n rhai-migration rhai-cli-0 -- \
-  /opt/rhai-cli/bin/rhai-cli llm freeze-templates
-```
-
-Or patch by hand:
+Patch each one (`llmisvc` is the short kind name the guide uses for `LLMInferenceService`):
 
 ```
 NS=<ns>; NAME=<llm-isvc>
-oc annotate llminferenceservice "$NAME" -n "$NS" --overwrite \
-  serving.kserve.io/config-llm-template=v2.25 \
-  serving.kserve.io/config-llm-decode-template=v2.25 \
-  serving.kserve.io/config-llm-worker-data-parallel=v2.25 \
-  serving.kserve.io/config-llm-decode-worker-data-parallel=v2.25 \
-  serving.kserve.io/config-llm-prefill-template=v2.25 \
-  serving.kserve.io/config-llm-prefill-worker-data-parallel=v2.25 \
-  serving.kserve.io/config-llm-scheduler=v2.25 \
-  serving.kserve.io/config-llm-router-route=v2.25
+oc patch llmisvc "$NAME" -n "$NS" \
+  --subresource=status --type=merge -p '{
+    "status": {
+      "annotations": {
+        "serving.kserve.io/config-llm-template":                        "kserve-config-llm-template",
+        "serving.kserve.io/config-llm-decode-template":                 "kserve-config-llm-decode-template",
+        "serving.kserve.io/config-llm-worker-data-parallel":            "kserve-config-llm-worker-data-parallel",
+        "serving.kserve.io/config-llm-decode-worker-data-parallel":     "kserve-config-llm-decode-worker-data-parallel",
+        "serving.kserve.io/config-llm-prefill-template":                "kserve-config-llm-prefill-template",
+        "serving.kserve.io/config-llm-prefill-worker-data-parallel":    "kserve-config-llm-prefill-worker-data-parallel",
+        "serving.kserve.io/config-llm-scheduler":                       "kserve-config-llm-scheduler",
+        "serving.kserve.io/config-llm-router-route":                    "kserve-config-llm-router-route"
+      }
+    }
+  }'
 ```
+
+Verify:
+
+```
+oc get llmisvc "$NAME" -n "$NS" -o jsonpath='{.status.annotations}' | jq '.'
+```
+
+All eight `serving.kserve.io/config-llm-*` keys should be present.
+
+> **Gotcha — scheduler arg changes for 3.x compatibility:** if you *override* the LLMInferenceService scheduler's `args` or `env` (i.e. you have a `spec.router.scheduler.containers[*]` block), the 3.x breaking changes below apply. If you haven't overridden the scheduler (most users), skip this.
+>
+> - `camelCase` → `kebab-case` args (e.g. `--certPath` → `--cert-path`)
+> - TLS cert path moved from `/etc/ssl/certs` to `/var/run/kserve/tls`
+> - Signed TLS certs via OpenShift service signer are mandatory
+> - Must include `--cert-path` arg and `SSL_CERT_DIR` env var
+>
+> Migration guide §2.8.10.4 has the diff of the updated scheduler block.
 
 ## Verify
 

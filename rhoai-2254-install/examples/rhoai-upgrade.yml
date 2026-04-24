@@ -1,0 +1,301 @@
+clusterVersion: 2.25.4
+results:
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+  group: dependency
+  kind: certmanager
+  name: installed
+  spec:
+    description: Reports the cert-manager operator installation status and version
+  status:
+    conditions:
+    - impact: blocking
+      lastTransitionTime: "2026-04-20T11:34:41Z"
+      message: certmanager operator is not installed
+      reason: ResourceNotFound
+      status: "False"
+      type: Available
+- group: dependency
+  kind: openshift-platform
+  name: version-requirement
+  spec:
+    description: Validates that OpenShift is at least version 4.19.9 when upgrading
+      to RHOAI 3.x
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-20T11:34:41Z"
+      message: OpenShift 4.19.25 meets RHOAI 3.3 minimum version requirement (4.19.9+)
+      reason: VersionCompatible
+      status: "True"
+      type: Compatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+  group: dependency
+  kind: servicemesh-operator-v2
+  name: upgrade
+  spec:
+    description: Validates that Service Mesh Operator v2 is not installed when upgrading
+      to RHOAI 3.x (no longer required, OpenShift 4.19+ handles service mesh internally)
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-20T11:34:41Z"
+      message: Service Mesh Operator v2 is not installed - ready for RHOAI 3.3 upgrade
+      reason: VersionCompatible
+      status: "True"
+      type: Compatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+  group: service
+  kind: servicemesh
+  name: removal
+  spec:
+    description: Validates that ServiceMesh is disabled before upgrading from RHOAI
+      2.x to 3.x (no longer required, OpenShift 4.19+ handles service mesh internally)
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-20T11:34:41Z"
+      message: 'ServiceMesh is disabled (state: Removed) - ready for RHOAI 3.3 upgrade'
+      reason: VersionCompatible
+      status: "True"
+      type: Compatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    workload.opendatahub.io/impacted-count: "0"
+  group: component
+  kind: dashboard
+  name: acceleratorprofile-migration
+  spec:
+    description: Lists legacy AcceleratorProfiles that will be auto-migrated to HardwareProfiles
+      (infrastructure.opendatahub.io) during upgrade
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-20T11:34:42Z"
+      message: No legacy AcceleratorProfiles found - no migration required
+      reason: NoMigrationRequired
+      status: "True"
+      type: MigrationRequired
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    workload.opendatahub.io/impacted-count: "0"
+  group: component
+  kind: dashboard
+  name: hardwareprofile-migration
+  spec:
+    description: Lists legacy HardwareProfiles (opendatahub.io) that will be auto-migrated
+      to HardwareProfiles (infrastructure.opendatahub.io) during upgrade
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-20T11:34:42Z"
+      message: No legacy HardwareProfiles found in opendatahub.io API group - no migration
+        required
+      reason: NoMigrationRequired
+      status: "True"
+      type: MigrationRequired
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    component.opendatahub.io/management-state: Managed
+  group: component
+  kind: datasciencepipelines
+  name: renaming
+  spec:
+    description: Informs about DataSciencePipelines component renaming to AIPipelines
+      in DSC v2 (RHOAI 3.x)
+  status:
+    conditions:
+    - impact: advisory
+      lastTransitionTime: "2026-04-20T11:34:42Z"
+      message: 'DataSciencePipelines component (state: Managed) will be renamed to
+        AIPipelines in DSC v2 (RHOAI 3.3). The field path changes from ''.spec.components.datasciencepipelines''
+        to ''.spec.components.aipipelines'''
+      reason: ComponentRenamed
+      remediation: No action required - the component will be automatically renamed.
+        Update any automation referencing '.spec.components.datasciencepipelines'
+        to use '.spec.components.aipipelines' after upgrade
+      status: "False"
+      type: Compatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    component.opendatahub.io/management-state: Managed
+  group: component
+  kind: kserve
+  name: serverless-removal
+  spec:
+    description: Validates that KServe serverless mode is disabled before upgrading
+      from RHOAI 2.x to 3.x (serverless support will be removed)
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-20T11:34:42Z"
+      message: 'KServe serverless mode is disabled (state: Removed) - ready for RHOAI
+        3.3 upgrade'
+      reason: VersionCompatible
+      status: "True"
+      type: Compatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    component.opendatahub.io/management-state: Managed
+    workload.opendatahub.io/impacted-count: "1"
+  group: workload
+  impactedObjects:
+  - apiVersion: datasciencepipelinesapplications.opendatahub.io/v1
+    kind: DataSciencePipelinesApplication
+    metadata:
+      name: dspa
+      namespace: sl-fuelpilot-dataplatform
+  kind: datasciencepipelines
+  name: instructlab-removal
+  spec:
+    description: Validates that DSPA objects do not use the removed InstructLab managedPipelines
+      field before upgrading to RHOAI 3.x
+  status:
+    conditions:
+    - impact: advisory
+      lastTransitionTime: "2026-04-20T11:34:42Z"
+      message: Found 1 DataSciencePipelinesApplication(s) with deprecated '.spec.apiServer.managedPipelines.instructLab'
+        field - InstructLab feature was removed in RHOAI 3.3
+      reason: FeatureRemoved
+      remediation: Remove the '.spec.apiServer.managedPipelines.instructLab' field
+        from affected DSPA objects before upgrading
+      status: "False"
+      type: Compatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+  group: workload
+  kind: datasciencepipelines
+  name: stored-version-removal
+  spec:
+    description: Validates that the DataSciencePipelinesApplication CRD does not have
+      v1alpha1 in status.storedVersions before upgrading to RHOAI 3.x
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-20T11:34:42Z"
+      message: No DataSciencePipelinesApplication resources using deprecated v1alpha1
+        API version - ready for RHOAI 3.3 upgrade
+      reason: VersionCompatible
+      status: "True"
+      type: VersionCompatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    component.opendatahub.io/management-state: Managed
+  group: workload
+  kind: kserve
+  name: impacted-workloads
+  spec:
+    description: Validates that inferenceservice-config ConfigMap has opendatahub.io/managed=false
+      and includes hardware-profile annotations in serviceAnnotationDisallowedList
+      before upgrading to RHOAI 3.x
+  status:
+    conditions:
+    - impact: advisory
+      lastTransitionTime: "2026-04-20T11:34:42Z"
+      message: inferenceservice-config ConfigMap must have opendatahub.io/managed=false
+        and include hardware-profile annotations in serviceAnnotationDisallowedList,
+        otherwise models may get restarted during upgrade to RHOAI 3.3
+      reason: ConfigurationUnmanaged
+      remediation: Set the annotation opendatahub.io/managed=false on the inferenceservice-config
+        ConfigMap, and add opendatahub.io/hardware-profile-name and opendatahub.io/hardware-profile-namespace
+        to the serviceAnnotationDisallowedList in the inferenceService data key
+      status: "False"
+      type: Configured
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    workload.opendatahub.io/impacted-count: "0"
+  group: workload
+  kind: kserve
+  name: impacted-workloads
+  spec:
+    description: Detects InferenceService CRs referencing legacy AcceleratorProfiles
+      that will be auto-migrated to HardwareProfiles (infrastructure.opendatahub.io)
+      during upgrade
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-20T11:34:42Z"
+      message: No InferenceServices found using legacy AcceleratorProfiles - no migration
+        needed
+      reason: VersionCompatible
+      status: "True"
+      type: AcceleratorProfileCompatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    workload.opendatahub.io/impacted-count: "0"
+  group: workload
+  kind: kserve
+  name: impacted-workloads
+  spec:
+    description: Lists InferenceServices and ServingRuntimes using deprecated deployment
+      modes (ModelMesh, Serverless), removed ServingRuntimes, or ServingRuntimes referencing
+      legacy AcceleratorProfiles that will be impacted in RHOAI 3.x
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-20T11:34:42Z"
+      message: No Serverless InferenceService(s) found - ready for RHOAI 3.3 upgrade
+      reason: VersionCompatible
+      status: "True"
+      type: ServerlessInferenceServicesCompatible
+    - lastTransitionTime: "2026-04-20T11:34:42Z"
+      message: No ModelMesh InferenceService(s) found - ready for RHOAI 3.3 upgrade
+      reason: VersionCompatible
+      status: "True"
+      type: ModelMeshInferenceServicesCompatible
+    - lastTransitionTime: "2026-04-20T11:34:42Z"
+      message: No ModelMesh ServingRuntime(s) found - ready for RHOAI 3.3 upgrade
+      reason: VersionCompatible
+      status: "True"
+      type: ModelMeshServingRuntimesCompatible
+    - lastTransitionTime: "2026-04-20T11:34:42Z"
+      message: No InferenceService(s) using removed ServingRuntime(s) found - ready
+        for RHOAI 3.3 upgrade
+      reason: VersionCompatible
+      status: "True"
+      type: RemovedServingRuntimesCompatible
+    - lastTransitionTime: "2026-04-20T11:34:42Z"
+      message: No ServingRuntime(s) with AcceleratorProfile annotation only found
+      reason: VersionCompatible
+      status: "True"
+      type: AcceleratorOnlyServingRuntimesCompatible
+    - lastTransitionTime: "2026-04-20T11:34:42Z"
+      message: No ServingRuntime(s) with both AcceleratorProfile and HardwareProfile
+        annotations found
+      reason: VersionCompatible
+      status: "True"
+      type: AcceleratorAndHWProfileServingRuntimesCompatible
+    - lastTransitionTime: "2026-04-20T11:34:42Z"
+      message: No InferenceService(s) referencing AcceleratorProfile-linked ServingRuntime(s)
+        found
+      reason: VersionCompatible
+      status: "True"
+      type: AcceleratorServingRuntimeISVCsCompatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    workload.opendatahub.io/impacted-count: "0"
+  group: workload
+  kind: notebook
+  name: acceleratorprofile-migration
+  spec:
+    description: Detects Notebook (workbench) CRs referencing legacy AcceleratorProfiles
+      that will be auto-migrated to HardwareProfiles (infrastructure.opendatahub.io)
+      during upgrade
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-20T11:34:42Z"
+      message: No Notebooks found using legacy AcceleratorProfiles - no migration
+        needed
+      reason: VersionCompatible
+      status: "True"
+      type: AcceleratorProfileCompatible
+- annotations:
+    check.opendatahub.io/target-version: 3.3.2
+    workload.opendatahub.io/impacted-count: "2"
+  group: workload
+  kind: notebook
+  name: impacted-workloads
+  spec:
+    description: Identifies Notebook (workbench) instances with images that will not
+      work in RHOAI 3.x
+  status:
+    conditions:
+    - lastTransitionTime: "2026-04-20T11:34:42Z"
+      message: All 2 Notebook(s) use compatible OOTB images
+      reason: VersionCompatible
+      status: "True"
+      type: NotebooksCompatible
+targetVersion: 3.3.2

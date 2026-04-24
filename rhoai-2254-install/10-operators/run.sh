@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# Installs operator prerequisites for RHOAI 2.25.4 in the pre-migration stack:
-#   - Service Mesh 2 (+ Jaeger, Kiali)        -- replaced by Service Mesh 3 in 3.x
-#   - OpenShift Serverless                    -- removed in 3.x (no Serverless KServe mode)
-#   - Standalone Authorino Operator           -- replaced by Red Hat Connectivity Link in 3.x
-#   - RHOAI operator, channel stable-2.25, pinned to CSV 2.25.4 (Manual approval)
+# Installs operator prerequisites for RHOAI 2.25.4.
+#
+# The three "2.x-era" operators (SM v2, Serverless, standalone Authorino) are gated
+# by env vars so install-from-assessment.sh can reproduce a partially-prepped cluster
+# that has already removed them. Default stays on (full pre-migration state).
+#
+#   INSTALL_SERVICE_MESH_V2=1|0         (default 1) — SM v2 + Kiali operator
+#   INSTALL_SERVERLESS=1|0              (default 1) — OpenShift Serverless operator
+#   INSTALL_AUTHORINO_STANDALONE=1|0    (default 1) — standalone Authorino operator
 #
 # cert-manager is intentionally NOT installed — migration §2.1 installs it.
 # Red Hat Connectivity Link is intentionally NOT installed — migration §2.8.10.1 installs it.
@@ -14,17 +18,33 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/common.sh
 source "${SCRIPT_DIR}/../lib/common.sh"
 
+: "${INSTALL_SERVICE_MESH_V2:=1}"
+: "${INSTALL_SERVERLESS:=1}"
+: "${INSTALL_AUTHORINO_STANDALONE:=1}"
+
 apply_manifest "${SCRIPT_DIR}/namespaces.yaml"
 
-apply_manifest "${SCRIPT_DIR}/servicemesh-v2.yaml"
-wait_for_csv_succeeded openshift-operators servicemeshoperator 900
-wait_for_csv_succeeded openshift-operators kiali-operator 600
+if [[ "$INSTALL_SERVICE_MESH_V2" == "1" ]]; then
+  apply_manifest "${SCRIPT_DIR}/servicemesh-v2.yaml"
+  wait_for_csv_succeeded openshift-operators servicemeshoperator 900
+  wait_for_csv_succeeded openshift-operators kiali-operator 600
+else
+  log "INSTALL_SERVICE_MESH_V2=0 — skipping Service Mesh v2 + Kiali"
+fi
 
-apply_manifest "${SCRIPT_DIR}/serverless.yaml"
-wait_for_csv_succeeded openshift-serverless serverless-operator 900
+if [[ "$INSTALL_SERVERLESS" == "1" ]]; then
+  apply_manifest "${SCRIPT_DIR}/serverless.yaml"
+  wait_for_csv_succeeded openshift-serverless serverless-operator 900
+else
+  log "INSTALL_SERVERLESS=0 — skipping OpenShift Serverless"
+fi
 
-apply_manifest "${SCRIPT_DIR}/authorino.yaml"
-wait_for_csv_succeeded openshift-operators authorino-operator 600
+if [[ "$INSTALL_AUTHORINO_STANDALONE" == "1" ]]; then
+  apply_manifest "${SCRIPT_DIR}/authorino.yaml"
+  wait_for_csv_succeeded openshift-operators authorino-operator 600
+else
+  log "INSTALL_AUTHORINO_STANDALONE=0 — skipping standalone Authorino"
+fi
 
 apply_manifest "${SCRIPT_DIR}/rhoai-operator.yaml"
 # Subscription uses installPlanApproval=Manual with startingCSV=rhods-operator.2.25.4.
