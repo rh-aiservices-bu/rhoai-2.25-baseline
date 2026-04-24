@@ -27,7 +27,19 @@ RHCL replaces the standalone Authorino operator and becomes the auth/policy cont
 
 Skip this if you do not use LLMInferenceService. Otherwise:
 
-> **Important:** RHCL does **not** support `OwnNamespace` install mode (`CSV status: OwnNamespace InstallModeType not supported`). Install it in `openshift-operators` (which ships an AllNamespaces OperatorGroup), not in a per-namespace OG with `targetNamespaces`. A `kuadrant-system` namespace is still used for the Kuadrant CR itself.
+**Confirmed subscription fields** (verified against `oc get packagemanifest rhcl-operator -n openshift-marketplace`):
+
+| Field | Value |
+| --- | --- |
+| Display name | Red Hat Connectivity Link |
+| Package name | `rhcl-operator` |
+| Catalog source | `redhat-operators` |
+| Channel | `stable` |
+| Install mode | **`AllNamespaces` only** (OwnNamespace / SingleNamespace / MultiNamespace all unsupported) |
+
+The **community** edition lives at `kuadrant-operator` in `community-operators`. **Do not** install that one — it is not supported for RHOAI 3.x and its CRD versions may not match what KServe LLM-d expects. Always use `rhcl-operator` from `redhat-operators`.
+
+> **Important:** Because only `AllNamespaces` is supported, install into `openshift-operators` (which ships an AllNamespaces OperatorGroup). A per-namespace OG with `targetNamespaces` will fail with `CSV status: OwnNamespace InstallModeType not supported`. The `kuadrant-system` namespace is still used for the Kuadrant CR itself — that CR is namespaced even though the operator watches cluster-wide.
 
 ```
 oc create ns kuadrant-system 2>/dev/null || true
@@ -163,7 +175,7 @@ For each LLMInferenceService, create an `AuthPolicy` that tells RHCL how to auth
 ```
 NS=<llm-namespace>; NAME=<llm-isvc-name>
 oc apply -f - <<EOF
-apiVersion: kuadrant.io/v1
+apiVersion: kuadrant.io/v1beta2
 kind: AuthPolicy
 metadata:
   name: ${NAME}-auth
@@ -179,6 +191,12 @@ spec:
         kubernetesTokenReview: {}
 EOF
 ```
+
+> **apiVersion:** confirm the served version on your cluster before applying — it changes between RHCL releases. RHCL 1.3.x serves `kuadrant.io/v1beta2` as the AuthPolicy storage version. Verify with:
+> ```
+> oc get crd authpolicies.kuadrant.io -o jsonpath='{range .spec.versions[?(@.storage==true)]}{.name}{end}'; echo
+> ```
+> If the output says `v1`, use `apiVersion: kuadrant.io/v1` instead.
 
 Replace with your real auth scheme (external OIDC, API keys, etc.). The exact shape depends on RHCL version and your IdP.
 

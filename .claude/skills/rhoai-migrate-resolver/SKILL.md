@@ -18,6 +18,7 @@ Ask the user up front which phase they're in. If they're not sure: check the RHO
 2. **Give the user the commands; let them run them.** Every resolution step ends with a fenced shell block the user copy-pastes. Always explain *what it changes* and *why*, then print the command.
 3. **One blocker at a time.** Don't dump the whole list. Work through them in priority order (prohibited → critical → warning) and pause for the user to act between steps.
 4. **Cite sources.** Every "why" must cite the relevant section of [architectural-changes.md](../../../architectural-changes.md) or [ignore.md](../../../ignore.md) (the migration guide). Use `§N.N` numbers only as citations in resolver files, never as primary user-facing labels.
+5. **Before emitting any `oc` command, load and follow [reference/oc-patterns.md](reference/oc-patterns.md).** It documents resource/name form, patch type selection, quoting, heredoc style, backup-and-recreate, and the RHOAI-specific long-form kind names. Do not improvise an `oc` command block that contradicts those patterns. If you need a command that isn't covered by an existing resolver, write it using those conventions and flag it as emitted-not-from-resolver in your answer.
 
 ## Pre-upgrade workflow
 

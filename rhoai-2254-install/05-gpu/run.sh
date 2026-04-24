@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Installs NFD + NVIDIA GPU Operator + CRs so nvidia.com/gpu resources become schedulable.
-# Required by the llm-isvc sample (and useful for any GPU-backed ModelServing test).
+# All samples in this repo are CPU-only by default (tinyllama OCI modelcar) so this
+# phase is opt-in.
 #
 # INSTALL_GPU modes:
-#   auto (default) — install only if no node has nvidia.com/gpu allocatable
+#   0 (default)    — skip. Samples run CPU-only.
+#   auto           — install only if the cluster has GPU capacity but no driver yet
+#                    (no node has nvidia.com/gpu allocatable)
 #   1              — force install
-#   0              — skip
 
 set -Eeuo pipefail
 
@@ -13,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/common.sh
 source "${SCRIPT_DIR}/../lib/common.sh"
 
-: "${INSTALL_GPU:=auto}"
+: "${INSTALL_GPU:=0}"
 
 case "$INSTALL_GPU" in
   0)

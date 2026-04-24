@@ -10,6 +10,15 @@ metadata:
 # Pre-migration LLMInferenceService — no authentication configured yet, no RHCL present.
 # Migration §2.8.10.3 will add AuthPolicy after installing Red Hat Connectivity Link.
 # Migration §2.8.10.4 will freeze the template annotations before the 3.3.2 upgrade.
+#
+# CPU-only variant: points at the same tinyllama OCI modelcar used by kserve-raw +
+# kserve-serverless, overrides the container image to vLLM-CPU, and drops all GPU
+# resources/tolerations. Schedules on a regular worker node.
+#
+# CAVEAT: LLMInferenceService is architected for LLM-d distributed inference on GPU;
+# the operator may inject scheduler/router sidecars that assume CUDA. If that happens
+# the pod may never reach Ready — the migration paths (§2.8.10.* RHCL + template pinning)
+# still apply because they key off the CR's existence, not its runtime health.
 apiVersion: serving.kserve.io/v1alpha1
 kind: LLMInferenceService
 metadata:
@@ -19,22 +28,26 @@ metadata:
     opendatahub.io/dashboard: "true"
 spec:
   model:
-    uri: "hf://ibm-granite/granite-3.0-2b-instruct"
-    name: granite-3.0-2b-instruct
+    uri: "oci://quay.io/rh-aiservices-bu/tinyllama:1.0"
+    name: tinyllama
   replicas: 1
   template:
-    tolerations:
-      - key: nvidia.com/gpu
-        operator: Exists
-        effect: NoSchedule
     containers:
       - name: main
+        image: quay.io/rh-aiservices-bu/vllm-cpu-openai-ubi9:0.3
+        args:
+          - --model
+          - /mnt/models
+          - --port
+          - "8080"
+          - --max-model-len
+          - "2048"
+          - --served-model-name
+          - tinyllama
         resources:
           requests:
             cpu: "2"
-            memory: 8Gi
-            nvidia.com/gpu: "1"
+            memory: 4Gi
           limits:
-            cpu: "4"
-            memory: 16Gi
-            nvidia.com/gpu: "1"
+            cpu: "8"
+            memory: 8Gi

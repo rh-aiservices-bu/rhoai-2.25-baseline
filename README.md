@@ -10,7 +10,7 @@ Everything lives under [rhoai-2254-install/](rhoai-2254-install/) and runs in fo
 
 | Phase | What it does |
 | --- | --- |
-| [05-gpu/](rhoai-2254-install/05-gpu/) | NFD + NVIDIA GPU Operator (auto-skipped if GPU capacity is already allocatable) |
+| [05-gpu/](rhoai-2254-install/05-gpu/) | Optional NFD + NVIDIA GPU Operator. **Skipped by default** — samples are CPU-only. Opt in with `INSTALL_GPU=auto` or `INSTALL_GPU=1`. |
 | [10-operators/](rhoai-2254-install/10-operators/) | Service Mesh v2, Serverless, Authorino, and the RHOAI 2.25.4 operator (pinned) |
 | [20-dsc/](rhoai-2254-install/20-dsc/) | `DSCInitialization` + `DataScienceCluster` — all components Managed, KServe in Serverless mode, ModelMesh Managed |
 | [30-samples/](rhoai-2254-install/30-samples/) | Flag-gated sample workloads covering every §2.x "Before upgrade" step: workbenches (incl. a custom upstream Jupyter image), BYON orphan ImageStream, KServe (Serverless + ModelMesh + RawDeployment), LLM ISVC, Ray, KFTO, TrustyAI, AI Pipelines, Feature Store (Feast), Llama Stack, Model Registry |
@@ -44,11 +44,11 @@ INSTALL_TRUSTYAI=0 \
 
 Sample flags (`INSTALL_RAY`, `INSTALL_WORKBENCHES`, etc.) all default to `1`. Full list is at the top of [30-samples/run.sh](rhoai-2254-install/30-samples/run.sh). If a single sample fails, the phase keeps going and the failed samples are reported at the end — rerun just that one with `./30-samples/<name>/run.sh`.
 
-`INSTALL_GPU` is tri-state:
+`INSTALL_GPU` is tri-state; all samples are CPU-only so GPU is opt-in:
 
-- `auto` (default) — install NFD + NVIDIA GPU Operator only if no node has `nvidia.com/gpu` allocatable; skip otherwise. Safe to re-run.
-- `1` — force install even if drivers are already present
-- `0` — skip entirely
+- `0` (default) — skip the GPU operator phase entirely.
+- `auto` — install NFD + NVIDIA GPU Operator only if the cluster has GPU hardware but no driver yet (no node has `nvidia.com/gpu` allocatable).
+- `1` — force install.
 
 Tear it all down (best-effort, reverse order):
 

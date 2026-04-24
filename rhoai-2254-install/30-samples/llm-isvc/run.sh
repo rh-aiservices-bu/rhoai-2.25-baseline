@@ -2,6 +2,10 @@
 # §2.8.10 LLMInferenceService — pre-migration state has no authentication and no RHCL.
 # The LLMInferenceService CRD ships with KServe; this sample exists so migration
 # §2.8.10.3 / §2.8.10.4 have something to annotate and secure.
+#
+# CPU variant using tinyllama (see llm-isvc.yaml caveat): no GPU required, schedules
+# on any worker. Pod Ready-ness is not guaranteed — LLM-d is architected for GPU —
+# but the CR exists for migration detection either way.
 
 set -Eeuo pipefail
 

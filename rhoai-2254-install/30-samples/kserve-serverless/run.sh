@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # §2.8.7.1 Serverless InferenceServices — the rhai-cli migration tool will flag these
 # as needing conversion to RawDeployment.
+#
+# Two ISVCs in ml-project-a and ml-project-b, each with a per-namespace CPU-only
+# vLLM ServingRuntime serving tinyllama via an OCI modelcar. No GPU required —
+# schedules on the regular worker nodes. Gives the migration a real working
+# Serverless workload to convert (the doc's classic sklearn example needs GCS egress).
 
 set -Eeuo pipefail
 

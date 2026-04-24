@@ -3,14 +3,15 @@
 # 2.25.4 -> 3.3.2 migration procedure has something to operate on.
 #
 # Phases:
-#   05-gpu         - installs NFD + NVIDIA GPU Operator (auto-skips if GPU already allocatable)
+#   05-gpu         - optional NFD + NVIDIA GPU Operator. Skipped by default (samples are CPU-only).
+#                    Set INSTALL_GPU=auto or INSTALL_GPU=1 to install. See 05-gpu/run.sh.
 #   10-operators   - installs Service Mesh v2, Serverless, Authorino, RHOAI 2.25.4 operator (pinned)
 #   20-dsc         - creates DSCInitialization + DataScienceCluster with all components Managed,
 #                    KServe in Serverless mode, ModelMesh Managed
 #   30-samples     - deploys flag-gated sample workloads that exercise every §2.x "before" step
 #
 # Toggle individual sample workloads with INSTALL_* env vars (all default to 1).
-# See 30-samples/run.sh for the full list. Set INSTALL_GPU=0 to skip 05-gpu.
+# See 30-samples/run.sh for the full list.
 
 set -Eeuo pipefail
 

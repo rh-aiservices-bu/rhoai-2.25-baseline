@@ -15,8 +15,84 @@ metadata:
     opendatahub.io/dashboard: "true"
     modelmesh-enabled: "false"
 ---
+# Custom per-namespace vLLM-CPU ServingRuntime. Using a small CPU-only model
+# (tinyllama via OCI modelcar) so the Serverless ISVCs actually become Ready
+# on the m6a worker nodes — no GPU required. The ServingRuntime is defined
+# per-namespace to mirror the real-world pattern (see kserve-modelmesh too).
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: vllm-cpu
+  namespace: ml-project-a
+  labels:
+    opendatahub.io/dashboard: "true"
+  annotations:
+    opendatahub.io/apiProtocol: REST
+    opendatahub.io/template-display-name: "CUSTOM - vLLM Serving Runtime for CPU"
+    opendatahub.io/template-name: vllm-cpu
+    openshift.io/display-name: "CUSTOM - vLLM CPU"
+spec:
+  multiModel: false
+  supportedModelFormats:
+    - name: vLLM
+      autoSelect: true
+  containers:
+    - name: kserve-container
+      image: quay.io/rh-aiservices-bu/vllm-cpu-openai-ubi9:0.3
+      args:
+        - --model
+        - /mnt/models
+        - --port
+        - "8080"
+        - --max-model-len
+        - "2048"
+        - --served-model-name
+        - tinyllama
+      ports:
+        - containerPort: 8080
+          name: http1
+          protocol: TCP
+  builtInAdapter:
+    modelLoadingTimeoutMillis: 90000
+---
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: vllm-cpu
+  namespace: ml-project-b
+  labels:
+    opendatahub.io/dashboard: "true"
+  annotations:
+    opendatahub.io/apiProtocol: REST
+    opendatahub.io/template-display-name: "CUSTOM - vLLM Serving Runtime for CPU"
+    opendatahub.io/template-name: vllm-cpu
+    openshift.io/display-name: "CUSTOM - vLLM CPU"
+spec:
+  multiModel: false
+  supportedModelFormats:
+    - name: vLLM
+      autoSelect: true
+  containers:
+    - name: kserve-container
+      image: quay.io/rh-aiservices-bu/vllm-cpu-openai-ubi9:0.3
+      args:
+        - --model
+        - /mnt/models
+        - --port
+        - "8080"
+        - --max-model-len
+        - "2048"
+        - --served-model-name
+        - tinyllama
+      ports:
+        - containerPort: 8080
+          name: http1
+          protocol: TCP
+  builtInAdapter:
+    modelLoadingTimeoutMillis: 90000
+---
 # Serverless InferenceService — migration §2.8.7.1 converts this to RawDeployment.
-# The annotation pins the deployment mode to Serverless even though the DSC default is also Serverless.
+# Uses CPU tinyllama so the ISVC actually becomes Ready after install without a GPU.
 apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
 metadata:
@@ -24,21 +100,27 @@ metadata:
   namespace: ml-project-a
   annotations:
     serving.kserve.io/deploymentMode: "Serverless"
+    openshift.io/display-name: my-serverless-isvc
   labels:
     opendatahub.io/dashboard: "true"
 spec:
   predictor:
     minReplicas: 1
     maxReplicas: 1
-    sklearn:
-      storageUri: gs://kfserving-examples/models/sklearn/1.0/model
+    automountServiceAccountToken: false
+    model:
+      modelFormat:
+        name: vLLM
+      name: ""
+      runtime: vllm-cpu
+      storageUri: oci://quay.io/rh-aiservices-bu/tinyllama:1.0
       resources:
         requests:
-          cpu: "100m"
-          memory: 256Mi
+          cpu: "2"
+          memory: 4Gi
         limits:
-          cpu: "1"
-          memory: 1Gi
+          cpu: "8"
+          memory: 8Gi
 ---
 apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
@@ -47,18 +129,24 @@ metadata:
   namespace: ml-project-b
   annotations:
     serving.kserve.io/deploymentMode: "Serverless"
+    openshift.io/display-name: another-sl-model
   labels:
     opendatahub.io/dashboard: "true"
 spec:
   predictor:
     minReplicas: 1
     maxReplicas: 1
-    sklearn:
-      storageUri: gs://kfserving-examples/models/sklearn/1.0/model
+    automountServiceAccountToken: false
+    model:
+      modelFormat:
+        name: vLLM
+      name: ""
+      runtime: vllm-cpu
+      storageUri: oci://quay.io/rh-aiservices-bu/tinyllama:1.0
       resources:
         requests:
-          cpu: "100m"
-          memory: 256Mi
+          cpu: "2"
+          memory: 4Gi
         limits:
-          cpu: "1"
-          memory: 1Gi
+          cpu: "8"
+          memory: 8Gi
