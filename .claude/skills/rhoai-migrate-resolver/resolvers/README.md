@@ -72,6 +72,11 @@ oc delete project rhai-migration
 
 ## Routing table
 
+**Primary path: run the router, don't match by hand.** Save the rhai-cli report to a file and
+run `bash ../scripts/route.sh <report>` — it prints the priority-ordered resolver list for
+you. The table below is the fallback the script is built from; use it only if the script can't
+recognize the report format.
+
 Match on (KIND, CHECK). If more than one row matches a resolver, walk through that resolver once.
 
 | GROUP | KIND | CHECK (substring match) | Resolver |

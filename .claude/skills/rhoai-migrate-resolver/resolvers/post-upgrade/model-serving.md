@@ -2,19 +2,33 @@
 
 *Covers migration guide §4.9 — citation only; user-facing label is `[model-serving]`.*
 
-Restore the `inferenceservice-config` ConfigMap management annotation, verify the 3.x controllers are running, and troubleshoot any leftover 2.x operators / unconverted workloads.
+**rhai-cli signal:** `post-upgrade-validate.sh` emits `[model-serving]` (FAIL or TODO). Restore the `inferenceservice-config` ConfigMap management annotation, verify the 3.x controllers are running, and troubleshoot any leftover 2.x operators / unconverted workloads.
 
-## Why
+> **EMIT — DON'T EXECUTE.** Print these commands for the admin to run. Do NOT run any
+> `oc apply` / `oc patch` / `oc delete` / `oc create` / helper script yourself unless the
+> user explicitly said "run it" for THIS resolver. Read-only `oc get`/`describe`/`logs` are
+> fine. Work one blocker at a time — after each step, STOP and wait for the user to say "done".
 
-During the pre-upgrade ConfigMap step (guide §2.8.8), `inferenceservice-config` is annotated with `opendatahub.io/managed=false` so manual edits survive the upgrade. Post-upgrade, it needs to be flipped back to `managed=true` so the 3.x operator owns it again. Leaving it unmanaged silently breaks future config changes.
+## Fill in these first
 
-Unconverted ISVCs return **HTTP 503** after the upgrade (architectural-changes.md § *Model Serving Migration*: "Models left unconverted will return HTTP 503 errors"). You can still convert them post-upgrade — the pre-upgrade path is just less disruptive.
+`redhat-ods-applications`, `rhai-migration`, and `rhai-cli-0` are real constants — leave them literal. Only these are fill-ins:
 
-## Finalize the inferenceservice-config ConfigMap
+| Placeholder | What it is | Get it with |
+| --- | --- | --- |
+| `<ISVC_NAMESPACE>` | namespace hosting a 503-affected model / the NetworkPolicy `internal-1` | `oc get isvc -A` |
+| `<ISVC_ROUTE>` | external route/host of the model endpoint you're curling | `oc get route -n <ISVC_NAMESPACE>` |
 
-If you customized `inferenceservice-config` yourself, skip this — otherwise restore management:
+## DO THIS
 
-```
+### Step 1 — Finalize the inferenceservice-config ConfigMap (TODO)
+
+Post-upgrade this ConfigMap must be flipped back to `managed=true` so the 3.x operator owns it again.
+
+→ if you customized `inferenceservice-config` yourself: SKIP this step. Otherwise restore management.
+
+Use the helper in the rhai-cli container:
+
+```sh
 # Use the helper in the rhai-cli container
 oc exec -n rhai-migration rhai-cli-0 -- \
   /opt/rhai-upgrade-helpers/model-serving/after-upgrade/managed-inferenceservice-config.sh \
@@ -23,7 +37,7 @@ oc exec -n rhai-migration rhai-cli-0 -- \
 
 Or by hand:
 
-```
+```sh
 oc annotate configmap inferenceservice-config -n redhat-ods-applications \
   opendatahub.io/managed=true --overwrite
 
@@ -31,22 +45,22 @@ oc annotate configmap inferenceservice-config -n redhat-ods-applications \
 oc rollout restart deployment/kserve-controller-manager -n redhat-ods-applications
 ```
 
-### Verify no ISVC was redeployed
+### Step 2 — Verify no ISVC was redeployed (read-only)
 
 A redeploy would show multiple ReplicaSets per ISVC with some at 0 replicas:
 
-```
+```sh
 for ns in $(oc get isvc -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\n"}{end}' | sort -u); do
   echo "--- $ns ---"
   oc get replicasets -n "$ns" -o custom-columns=NAME:.metadata.name,CREATED:.metadata.creationTimestamp,REPLICAS:.status.replicas
 done
 ```
 
-Each ISVC should have exactly one active ReplicaSet.
+→ Expected: each ISVC has exactly one active ReplicaSet.
 
-## Verify 3.x controllers
+### Step 3 — Verify 3.x controllers (read-only)
 
-```
+```sh
 # KServe controller
 oc get pods -n redhat-ods-applications -l control-plane=kserve-controller-manager
 
@@ -61,7 +75,9 @@ oc get llminferenceservices --all-namespaces
 # READY column must show True and URL must be present
 ```
 
-## Troubleshooting
+→ Expected: KServe controller and ODH Model Controller pods `Running`; every ISVC row shows `RawDeployment` + `True`; any LLMInferenceService shows `READY=True` with a populated URL.
+
+## Troubleshooting (conditional fixes)
 
 ### Serverless ISVC not converted before upgrade
 
@@ -89,9 +105,9 @@ oc get llminferenceservices --all-namespaces
 
 **Impact:** None for ISVCs (RawDeployment uses Deployment, not Knative). Only wastes resources.
 
-**Resolution:** Only uninstall if nothing else on the cluster uses Serverless:
+**Resolution:** → only uninstall if nothing else on the cluster uses Serverless. ⚠️ Destructive — deletes the KnativeServing CR, the operator subscription/CSV, and the `knative-serving` namespace. Confirm no other workload depends on Serverless before running.
 
-```
+```sh
 oc delete knativeserving knative-serving -n knative-serving --ignore-not-found
 
 CSV=$(oc get subscription serverless-operator -n openshift-serverless -o jsonpath='{.status.installedCSV}' 2>/dev/null)
@@ -111,35 +127,42 @@ oc delete namespace knative-serving --ignore-not-found
 
 **Resolution:**
 
-1. If you have `LLMInferenceService` resources, install RHCL first (see [../llm-isvc.md](../llm-isvc.md)). Then uninstall standalone Authorino:
-   ```
-   CSV=$(oc get subscription authorino-operator -n openshift-operators -o jsonpath='{.status.installedCSV}' 2>/dev/null)
-   oc delete subscription authorino-operator -n openshift-operators --ignore-not-found
-   [[ -n "$CSV" ]] && oc delete csv "$CSV" -n openshift-operators --ignore-not-found
-   ```
-2. If no LLMInferenceService exists, the operator is harmless but wasted — same uninstall commands apply when convenient.
+→ if you have `LLMInferenceService` resources: install RHCL first (see [../llm-isvc.md](../llm-isvc.md)), THEN uninstall standalone Authorino with the commands below.
+→ if no LLMInferenceService exists: the operator is harmless but wasted — same uninstall commands apply when convenient.
+
+⚠️ Destructive — deletes the standalone Authorino subscription and CSV. If you have LLMInferenceServices, do NOT run this until RHCL is installed.
+
+```sh
+CSV=$(oc get subscription authorino-operator -n openshift-operators -o jsonpath='{.status.installedCSV}' 2>/dev/null)
+oc delete subscription authorino-operator -n openshift-operators --ignore-not-found
+[[ -n "$CSV" ]] && oc delete csv "$CSV" -n openshift-operators --ignore-not-found
+```
 
 ### Inference 503s from a NetworkPolicy that pins ingress to a specific router shard
 
-**Symptom:** ISVC pods Running, ISVC `Ready=True`, but `curl https://<isvc-route>/v1/models` from outside the cluster returns HTTP 503.
+**Symptom:** ISVC pods Running, ISVC `Ready=True`, but `curl https://<ISVC_ROUTE>/v1/models` from outside the cluster returns HTTP 503.
 
 **Cause:** in tightly-controlled environments, namespaces hosting models often have a NetworkPolicy (commonly named `internal-1`) that allows ingress only from a specific router shard pod selector — for example, `internal-router-shard`. RHOAI 3.x creates ISVC routes against the **default** router (and the data-science-gateway's HTTPRoute attaches there), so traffic from the default router pods gets dropped by the NetworkPolicy and the user sees a 503.
 
-This is a common post-upgrade finding on clusters with namespace-scoped router-shard isolation; it can affect any number of model-hosting namespaces. Diagnose by listing NetworkPolicies in any 503-affected namespace and inspecting the `from` selector.
+Diagnose by listing NetworkPolicies in any 503-affected namespace and inspecting the `from` selector. Confirm the current structure first:
+
+```sh
+oc get networkpolicy internal-1 -n "$NS" -o yaml
+```
 
 **Fix:** broaden the `from` selector to match the `openshift-ingress` namespace (which contains both the default router and the data-science-gateway), instead of pinning to a specific router pod label:
 
-```
-NS=<isvc-namespace>
+```sh
+NS=<ISVC_NAMESPACE>
 oc patch networkpolicy internal-1 -n "$NS" --type=json \
   -p='[{"op":"replace","path":"/spec/ingress/0/from/0","value":{"namespaceSelector":{"matchLabels":{"name":"openshift-ingress"}}}}]'
 ```
 
-(Adjust `/spec/ingress/0/from/0` if your NetworkPolicy structure is different — `oc get networkpolicy internal-1 -n "$NS" -o yaml` first.)
+→ Adjust `/spec/ingress/0/from/0` if your NetworkPolicy structure is different (that's why you ran the `-o yaml` check above).
 
 If you have many namespaces with the same NetworkPolicy:
 
-```
+```sh
 for ns in $(oc get networkpolicy -A -o json | jq -r '.items[] | select(.metadata.name=="internal-1") | .metadata.namespace'); do
   echo "patching $ns"
   oc patch networkpolicy internal-1 -n "$ns" --type=json \
@@ -159,3 +182,13 @@ Verify by curling a previously-503'ing model endpoint.
 - **Gateway API:** Cluster Ingress Operator fails to install OSSM v3 components while v2 is present.
 
 **Resolution:** Same sequence as the pre-upgrade resolver in [../kserve.md](../kserve.md) § *Uninstall Service Mesh v2*. **First** confirm no non-RHOAI workload depends on SM v2, or migrate those to v3 via the OSSM docs: [Migrating from Service Mesh 2 to Service Mesh 3](https://docs.redhat.com/en/documentation/red_hat_openshift_service_mesh/3.1/html/migrating_from_service_mesh_2_to_service_mesh_3/).
+
+## Why (reference)
+
+During the pre-upgrade ConfigMap step (guide §2.8.8), `inferenceservice-config` is annotated with `opendatahub.io/managed=false` so manual edits survive the upgrade. Post-upgrade, it needs to be flipped back to `managed=true` so the 3.x operator owns it again. Leaving it unmanaged silently breaks future config changes.
+
+Unconverted ISVCs return **HTTP 503** after the upgrade (architectural-changes.md § *Model Serving Migration*: "Models left unconverted will return HTTP 503 errors"). You can still convert them post-upgrade — the pre-upgrade path is just less disruptive.
+
+## Notes & edge cases (reference)
+
+- The router-shard NetworkPolicy 503 (`internal-1`) is a common post-upgrade finding on clusters with namespace-scoped router-shard isolation; it can affect any number of model-hosting namespaces — the per-namespace loop above handles the bulk case.

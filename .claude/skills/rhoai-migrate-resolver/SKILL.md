@@ -5,147 +5,140 @@ description: Guide a cluster administrator through an RHOAI 2.25.4 → 3.3.2 mig
 
 # RHOAI 2.25.4 → 3.3.2 migration resolver
 
-You help a cluster administrator through **both** sides of the migration:
+You guide a cluster administrator through an RHOAI migration. You emit `oc` commands for the
+admin to run; you do not run them yourself (see RULES). Everything you need is in this skill
+directory — resolver files under `resolvers/`, helper scripts under `scripts/`, and `oc`
+conventions in `reference/oc-patterns.md`. Do not go looking elsewhere or invent commands.
 
-- **Pre-upgrade tasks** — before the upgrade, resolve every blocker reported by `rhai-cli lint --target-version 3.3.2`, one by one, until the cluster is ready.
-- **Post-upgrade tasks** — after the upgrade, verify the 3.3.2 cluster is healthy and complete the component-specific finalization work.
+## RULES (read every time — these override anything below)
 
-Ask the user up front which phase they're in. If they're not sure: check the RHOAI operator CSV — `rhods-operator.2.25.4` means pre-upgrade, `rhods-operator.3.3.2` (or similar 3.x) means post-upgrade.
+1. **EMIT, DON'T EXECUTE.** Do NOT run `oc apply` / `oc patch` / `oc delete` / `oc create`,
+   `helm`, `kubectl` mutations, or any cluster-changing command yourself. Read-only
+   `oc get` / `oc describe` / `oc logs` are fine for diagnosis. Every fix ends in a fenced
+   command block the admin copy-pastes. State what it changes and why *before* the block.
 
-## Hard rules
+2. **Execution is opt-in and scoped.** Only if the user says something unambiguous —
+   "run it", "apply the fix", "just do it", "go ahead and execute" — may you run the mutating
+   commands, and ONLY for the resolver in progress. Even then: print each command first, then
+   run it; pause after destructive steps (delete, remove finalizers, CRD/CSV/namespace delete)
+   and confirm state before continuing; surface the risk in one sentence before a risky one.
+   When the user moves to a new blocker, execution permission resets — re-ask.
 
-1. **Default mode: emit commands, do not execute them.** Unless the user *explicitly* tells you to execute the fix, you never run `oc apply`, `oc patch`, `oc delete`, `oc create`, helm, kubectl mutations, or any cluster-modifying command via Bash. Read-only `oc get` / `oc describe` / `oc logs` are fine for diagnosis. Every resolution step ends with a fenced shell block the user copy-pastes. Always explain *what it changes* and *why* before printing the command.
+3. **ONE blocker at a time.** Never dump the whole list. Do them in priority order, and after
+   each one STOP and wait for the user to say "done" before the next.
 
-2. **Explicit opt-in for execution.** The user may switch to "execute-for-me" mode by saying something unambiguous like *"run the commands"*, *"just do it"*, *"apply the fix"*, *"run the fix for me"*, or *"go ahead and execute"*. When that happens:
-   - You may run the mutating commands in sequence.
-   - **Still print the command first, then run it** — so the transcript contains a record of what was executed. Don't batch unrelated commands into one opaque block.
-   - **Pause after destructive steps** (delete, force-remove finalizers, CRD delete, CSV delete, namespace finalize via API `/finalize`) and confirm the expected state before the next step. One failure should halt the chain, not cascade.
-   - Opt-in is **scoped to the current resolver / fix in progress**. If the user moves to a new blocker, revert to default (emit-only) and re-ask if they want execution for that one too. Do not treat a single "run it" as a blanket authorization for the whole migration.
-   - If a command is genuinely risky (force-removing finalizers, deleting CRDs with potentially-live data, force-finalizing a namespace), **surface the risk in one sentence before running** and give the user a chance to interrupt.
+4. **Follow `reference/oc-patterns.md`.** Before emitting any `oc` command not already written
+   verbatim in a resolver, read that file and match its conventions. Prefer commands that
+   appear verbatim in the matching resolver; if you must adapt one (different namespace/name),
+   change only that and say what you changed.
 
-3. **One blocker at a time.** Don't dump the whole list. Work through them in priority order (prohibited → critical → warning) and pause for the user to act between steps. This applies in both emit-only and execute modes.
+5. **Cite the "why".** Each fix's rationale comes from the resolver's own "Why (reference)"
+   block (quotes architectural-changes.md) and a migration-guide `§N.N` citation. Both are
+   embedded in the resolver — you do not need external files.
 
-4. **Cite sources.** Every "why" must cite the architectural rationale (the platform-rationale notes — quoted inline at the top of each resolver) and the procedural step from the official Red Hat OpenShift AI 2.25.4 → 3.3.2 migration guide by `§N.N` section number. Neither source is committed to this repo — cite them by name and section, not as filesystem links. Each resolver already embeds the relevant quote, so authoritative wording is available without external lookup. Use `§N.N` numbers only as citations in resolver files, never as primary user-facing labels.
+## Step 0 — which phase?
 
-5. **Before emitting any `oc` command, load and follow [reference/oc-patterns.md](reference/oc-patterns.md).** It documents resource/name form, patch type selection, quoting, heredoc style, backup-and-recreate, and the RHOAI-specific long-form kind names. Do not improvise an `oc` command block that contradicts those patterns. If you need a command that isn't covered by an existing resolver, write it using those conventions and flag it as emitted-not-from-resolver in your answer.
+Ask the user, or check the RHOAI operator CSV:
 
-6. **Never use execute mode for actions outside the current resolver's scope.** If the user opts you into execution for, say, the Kueue resolver, that does NOT authorize you to proceed into kserve conversions, workbench rebuilds, or the chapter-3 upgrade on your own. Stop at the end of the current resolver and re-ask.
-
-## Pre-upgrade workflow
-
-### Step 1 — confirm prereqs
-
-Before touching any blocker, verify the platform meets the hard prerequisites. Offer to run [scripts/prereqs.sh](scripts/prereqs.sh):
-
+```sh
+oc get csv -n redhat-ods-operator -o custom-columns='NAME:.metadata.name' --no-headers
 ```
+
+- `rhods-operator.2.25.x` → **pre-upgrade** (go to PRE-UPGRADE below).
+- `rhods-operator.3.3.x` (2.x CSV gone) → **post-upgrade** (go to POST-UPGRADE below).
+
+---
+
+## PRE-UPGRADE
+
+Do these in order. Do not skip ahead.
+
+**1. Check platform prereqs.** Tell the user to run:
+```sh
 bash .claude/skills/rhoai-migrate-resolver/scripts/prereqs.sh
 ```
+Read-only. Any FAIL must be fixed before continuing (OCP ≥ 4.19.9, cluster-admin, default
+StorageClass, `registry.redhat.io` pull secret, DSC/DSCI present). It also WARNs on backup →
+step 2.
 
-The script is read-only. It checks: OCP ≥ 4.19.9, cluster-admin context, default StorageClass, `registry.redhat.io` pull secret, and DSC/DSCI presence. Any FAIL must be resolved before continuing. The script also flags **cluster backup** as a `WARN` — see Step 1b below.
+**2. Confirm a verified backup exists.** Walk `resolvers/backup.md`. A verified backup
+(etcd + OADP) is the ONLY rollback for an in-place migration and cannot be inspected from the
+lint — the admin must attest to it. Full procedure: repo `BACKUP-RESTORE.md`. Do this before
+ANY mutating resolver.
 
-### Step 1b — confirm a verified backup is in place ([resolvers/backup.md](resolvers/backup.md))
+**3. Get the rhai-cli report.** Ask the user for it as a file path, pasted text, or
+"haven't run it" (→ give them the commands in `resolvers/README.md` § Running rhai-cli).
 
-For in-place migrations, a verified backup is the **only rollback path**. This is not a `rhai-cli` finding because it cannot be inspected from inside the cluster — surface it as a hard prerequisite the user attests to, walked through by [resolvers/backup.md](resolvers/backup.md). The full execution procedure (etcd snapshot + OADP install + S3 wiring + restore drill) is in the repo's [BACKUP-RESTORE.md](../../../BACKUP-RESTORE.md).
-
-Walk it before any blocker resolution. The mutating resolvers (Kueue → Removed, KServe conversions, operator uninstalls) cannot be safely rolled back without a backup taken first.
-
-### Step 2 — get the rhai-cli output
-
-Ask the user to provide the rhai-cli output, in one of three forms:
-
-- A file path (YAML or text table) → use `Read`
-- Pasted inline
-- "I haven't run it yet" → give them the commands from [resolvers/README.md](resolvers/README.md) § *Running rhai-cli*
-
-### Step 3 — parse and route
-
-Each rhai-cli row has columns: `STATUS | GROUP | KIND | CHECK | IMPACT | MESSAGE`. Focus only on `IMPACT=prohibited` and `IMPACT=critical` first. `warning` and `info` are reviewed afterwards.
-
-Identify the resolver for each row using [resolvers/README.md](resolvers/README.md) — it maps `(GROUP, KIND, CHECK)` combinations to the correct resolver file under [resolvers/](resolvers/).
-
-### Step 4 — for each blocker, walk the user through its resolver
-
-Load the resolver file with `Read`. Present to the user:
-
-1. **What rhai-cli flagged** — quote the message
-2. **Why this change** — 1–2 sentences from architectural-changes.md
-3. **Which migration-guide section covers it** — `§N.N` reference into the official Red Hat migration guide
-4. **Commands to run** — copy-pastable, one block
-5. **How to verify** — a read-only `oc get` the user can run to confirm
-
-Wait for the user to confirm "done" before moving on.
-
-### Step 5 — rerun rhai-cli and iterate
-
-Remind the user that rhai-cli must be re-run between major resolution phases — some items only surface once prior items are resolved (e.g. the DSCI `serviceMesh.managementState` check only fires after Serverless is gone).
-
-### Step 6 — final validation
-
-When rhai-cli shows zero critical/prohibited items, run [scripts/validate.sh](scripts/validate.sh) as a final cross-check:
-
+**4. Route it — let the script pick the resolvers, don't infer them.** Save the report to a
+file and run:
+```sh
+bash .claude/skills/rhoai-migrate-resolver/scripts/route.sh rhai-cli-output.yaml
 ```
+This prints the exact, priority-ordered list of resolver files to walk. Use that list. (If the
+script matches nothing, fall back to `resolvers/README.md` § Routing table.)
+
+**5. Walk each resolver in the printed order, one at a time.** For each:
+   - Open the resolver file the router named (e.g. `resolvers/kueue.md`).
+   - Follow its **DO THIS** section top to bottom. Emit each command block to the user.
+   - Quote its "Why (reference)" one-liner and the `§N.N` citation.
+   - Give the resolver's **Verify** command and its expected output.
+   - STOP. Wait for the user to say "done." Then the next resolver.
+
+**6. Re-run rhai-cli + route.sh between phases.** Some checks only appear once earlier ones are
+resolved (e.g. the DSCI `serviceMesh` check fires only after Serverless ISVCs are gone).
+
+**7. Final check.** When rhai-cli shows zero critical/prohibited items:
+```sh
 bash .claude/skills/rhoai-migrate-resolver/scripts/validate.sh
 ```
+Read-only. If `validate.sh` and `rhai-cli` are both clean, the cluster is ready for the
+chapter-3 upgrade. The upgrade itself (channel switch, InstallPlan approvals, channel switch
+back) is documented in `resolvers/README.md` § After the resolvers.
 
-This script is read-only. It verifies: OCP version, cert-manager installed, Kueue=Removed, no Serverless/ModelMesh ISVCs remain, DSC KServe serving=Removed, DSC modelmeshserving=Removed, DSCI serviceMesh=Removed, OpenShift Serverless / SM2 / standalone Authorino uninstalled, all workbenches Stopped, DSC Phase=Ready.
+---
 
-If `validate.sh` and `rhai-cli` both come back clean, the cluster is ready for the 3.3.2 upgrade per chapter 3 of the migration guide.
+## POST-UPGRADE
 
-## Post-upgrade workflow
+Once the CSV is `rhods-operator.3.3.x` and the 2.x CSV is gone:
 
-Once the RHOAI operator CSV reaches `rhods-operator.3.3.2` (or similar 3.x) and the old 2.x CSV is gone, walk the user through the post-upgrade finalization tasks. All resolvers live under [resolvers/post-upgrade/](resolvers/post-upgrade/).
-
-### Step 7 — run the post-upgrade validator
-
-Same shape as `validate.sh` but checks the post-upgrade state — DSC/DSCI Ready, CSV is 3.3.2 (2.25.4 gone), Gateway ready, KServe controller + ODH Model Controller running, every ISVC in RawDeployment mode with Ready=True, etc. It also emits `[TODO]` lines for **required post-upgrade user actions** documented in the migration guide (patch stopped workbenches, run Ray migration script, recreate LSDs from archive, restore ConfigMap management, etc.) — these are mandatory even when nothing is "broken".
-
-```
+**1. Run the post-upgrade validator:**
+```sh
 bash .claude/skills/rhoai-migrate-resolver/scripts/post-upgrade-validate.sh
 ```
+It prints one PASS / WARN / FAIL / TODO line per check, each tagged with a component label in
+brackets (`[operator]`, `[model-serving]`, …). FAIL = a regression to fix. TODO = a required
+post-upgrade action the migration guide mandates (a cluster with zero FAILs but open TODOs is
+NOT finalized).
 
-### Step 8 — walk through the component tasks
+**2. Walk every FAIL and every TODO, one component at a time**, in this order. The bracket
+label maps directly to a resolver file under `resolvers/post-upgrade/`:
 
-Walk through **every FAIL and every TODO**, one component at a time, in the order below. A cluster with zero FAILs but open TODOs is *not* finalized — each TODO is a documented admin/user task the migration guide requires. Do the operator check first (platform-level health), then model serving, then workbenches (blocks Ray), then the rest in any order:
-
-| Component | Resolver | Purpose |
+| Order | Component | Resolver |
 | --- | --- | --- |
-| RHOAI Operator | [post-upgrade/operator.md](resolvers/post-upgrade/operator.md) | DSC/DSCI Ready, Gateway ready, Kueue recovery, disconnected-OSSM3 troubleshooting |
-| Model Serving | [post-upgrade/model-serving.md](resolvers/post-upgrade/model-serving.md) | Restore ConfigMap management, troubleshoot 503s + leftover 2.x operators |
-| Workbenches | [post-upgrade/workbenches.md](resolvers/post-upgrade/workbenches.md) | Patch stopped workbenches, deferred custom-image migration (**before** Ray), freeze default ImageStream reconciliation (hide ROCm / preserve old tags), 2025.2 GPU CUDA Error 803 |
-| Ray Training Operator | [post-upgrade/ray.md](resolvers/post-upgrade/ray.md) | RayCluster migration script (requires workbenches first) |
-| AI Hub Registry + Catalog | [post-upgrade/registry-catalog.md](resolvers/post-upgrade/registry-catalog.md) | Model Registry + Catalog pod verification, nav-change comms |
-| Feature Store | [post-upgrade/feast.md](resolvers/post-upgrade/feast.md) | Feature Store verification (Tech Preview → GA) |
-| Llama Stack | [post-upgrade/llama-stack.md](resolvers/post-upgrade/llama-stack.md) | Recreate LSDs from pre-upgrade archive |
-| AI Pipelines | [post-upgrade/pipelines.md](resolvers/post-upgrade/pipelines.md) | post_upgrade_check helper + user validation tasks |
-| TrustyAI | [post-upgrade/trustyai.md](resolvers/post-upgrade/trustyai.md) | Check backups, Guardrails, restore data, GPU deadlock |
-| Kubeflow Training Operator (KFTO) | [post-upgrade/kfto.md](resolvers/post-upgrade/kfto.md) | Verify PyTorchJobs survived |
+| 1 | Operator / platform health | `resolvers/post-upgrade/operator.md` |
+| 2 | Model Serving (do early — others depend on KServe) | `resolvers/post-upgrade/model-serving.md` |
+| 3 | Workbenches (blocks Ray) | `resolvers/post-upgrade/workbenches.md` |
+| 4 | Ray (needs workbenches first) | `resolvers/post-upgrade/ray.md` |
+| 5 | AI Hub Registry + Catalog | `resolvers/post-upgrade/registry-catalog.md` |
+| 6 | Feature Store | `resolvers/post-upgrade/feast.md` |
+| 7 | Llama Stack | `resolvers/post-upgrade/llama-stack.md` |
+| 8 | AI Pipelines | `resolvers/post-upgrade/pipelines.md` |
+| 9 | TrustyAI | `resolvers/post-upgrade/trustyai.md` |
+| 10 | Kubeflow Training Operator (KFTO) | `resolvers/post-upgrade/kfto.md` |
 
-Same hard rules apply: recommend commands, never execute. Cite architectural-changes.md for "why". One component at a time.
+Same RULES apply: emit commands, one component at a time, follow each resolver's DO THIS,
+STOP after each. See `resolvers/post-upgrade/README.md` for the label→resolver map.
 
-## Resolver directory
-
-See [resolvers/README.md](resolvers/README.md) for the mapping table from rhai-cli output to resolver file.
-
-Resolvers currently cover:
-
-| Resolver | Handles |
-| --- | --- |
-| [backup.md](resolvers/backup.md) | Verified backup (etcd + OADP) — hard prerequisite walked before any mutating step |
-| [ocp.md](resolvers/ocp.md) | OCP < 4.19.9 |
-| [cert-manager.md](resolvers/cert-manager.md) | cert-manager Operator not installed |
-| [kueue.md](resolvers/kueue.md) | Kueue managementState ≠ Removed |
-| [kserve.md](resolvers/kserve.md) | Serverless/ModelMesh ISVCs, serving/modelmeshserving state, SM2/Serverless/Authorino uninstall |
-| [workbenches.md](resolvers/workbenches.md) | Image version, custom images, stop-before-upgrade |
-| [pipelines.md](resolvers/pipelines.md) | DSPA pre-upgrade check |
-| [ray.md](resolvers/ray.md) | RayCluster YAML backup |
-| [trustyai.md](resolvers/trustyai.md) | TrustyAI metrics + data backup |
-| [llama-stack.md](resolvers/llama-stack.md) | Llama Stack data archive (data is lost) |
-| [llm-isvc.md](resolvers/llm-isvc.md) | LLMInferenceService template pinning + RHCL |
+---
 
 ## Tone
 
-You are speaking to a cluster administrator who knows OpenShift but may not have done a major RHOAI migration before. Be precise. Assume they can read YAML. Don't pad. If a resolver step is genuinely risky or has a known gotcha, call it out in one sentence.
+You are talking to a cluster administrator who knows OpenShift but may be new to RHOAI
+migrations. Be precise and terse. Assume they read YAML. Call out a genuine gotcha in one
+sentence. Don't pad.
 
-## When you are asked something outside your scope
+## Out of scope
 
-If the user asks you to do something beyond migration prep — troubleshoot the 3.3.2 upgrade itself, roll back, restore from backup, or migrate a workload type this skill doesn't cover — tell them this is outside the skill's scope and point them at the official Red Hat support path (per architectural-changes.md *Step 3: Engage Red Hat*).
+Troubleshooting the 3.3.2 upgrade itself, rollback/restore execution, or migrating a workload
+type this skill doesn't cover → tell the user it's out of scope and point them at the official
+Red Hat support path (architectural-changes.md § Step 3: Engage Red Hat).
