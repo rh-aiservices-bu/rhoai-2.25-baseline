@@ -35,9 +35,11 @@ spec:
       prune: true
     syncOptions:
       - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
     retry:
-      limit: 20
+      limit: 60
       backoff:
         duration: 30s
         factor: 2
-        maxDuration: 5m
+        maxDuration: 2m

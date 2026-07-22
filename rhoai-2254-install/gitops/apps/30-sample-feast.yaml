@@ -23,9 +23,11 @@ spec:
       prune: true
     syncOptions:
       - CreateNamespace=true
+      - SkipDryRunOnMissingResource=true
+      - RespectIgnoreDifferences=true
     retry:
-      limit: 15
+      limit: 60
       backoff:
         duration: 30s
         factor: 2
-        maxDuration: 5m
+        maxDuration: 2m

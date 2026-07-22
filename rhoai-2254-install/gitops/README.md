@@ -48,6 +48,22 @@ than blocks on CRD readiness — `wait_for_crd` is replaced by `retry.backoff`.
 A sample that needs a CRD installed by the DSC will fail its first sync, sleep,
 and re-sync until the CRD lands.
 
+For that retry-until-CRD-lands pattern to work reliably, every `30-sample-*`
+Application uses:
+
+* `retry.limit: 60` with `backoff.duration: 30s`, `factor: 2`,
+  `maxDuration: 2m` — ~2h of retry budget, covering a slow RHOAI operator
+  install (KServe CRDs in particular can lag DSC creation by 20+ minutes).
+* `syncOptions.SkipDryRunOnMissingResource=true` — Argo CD's early dry-run
+  check tolerates the target CRD being absent instead of failing fast.
+* `syncOptions.RespectIgnoreDifferences=true` — the dry-run check honours the
+  Application's `ignoreDifferences` block so operator-defaulted fields on a
+  half-applied resource don't spuriously re-mark it OutOfSync.
+
+If you see a sample sitting `OutOfSync / Missing` for more than ~30 min after
+the DSC reports `Ready`, that budget wasn't the issue — check the app's
+`.status.operationState.message` for the underlying failure.
+
 ## Bootstrap
 
 1. Fork this repo to a Git remote Argo CD can reach.
