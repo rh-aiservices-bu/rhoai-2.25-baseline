@@ -13,14 +13,6 @@ metadata:
   namespace: openshift-gitops
 spec:
   kustomizeBuildOptions: "--load-restrictor=LoadRestrictionsNone"
-  # Track managed resources by the argocd.argoproj.io/tracking-id annotation
-  # instead of the default app.kubernetes.io/instance label. The RHPDS
-  # gitops-bootstrap health check selects Applications by that label
-  # (app.kubernetes.io/instance=bootstrap-infra), which the overlays and the
-  # root Application set explicitly. With the default label-based tracking,
-  # ArgoCD would own that label on managed objects and fight the hardcoded
-  # value; annotation tracking frees the label for the bootstrap selector.
-  resourceTrackingMethod: annotation
   # Default operator memory limit for the application-controller is 2Gi.
   # Under the 30-sample-* retry policy (limit: 60, backoff.maxDuration: 2m)
   # the controller's working set — active Applications + rendered manifests

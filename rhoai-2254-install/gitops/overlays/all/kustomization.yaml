@@ -4,17 +4,6 @@
 # selects when OVERLAY is unset.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# Label every Application so the RHPDS gitops-bootstrap health check
-# (roles/ocp4_workload_gitops_bootstrap: label_selectors
-#  app.kubernetes.io/instance={{ ocp4_workload_gitops_bootstrap_application_name }})
-# selects and waits on them. includeSelectors:false — Application objects have no
-# label selectors. Requires annotation-based resource tracking on the ArgoCD
-# instance (see bootstrap/15-argocd-config.yaml) so this label doesn't clash with
-# ArgoCD's own label tracking.
-labels:
-  - includeSelectors: false
-    pairs:
-      app.kubernetes.io/instance: bootstrap-infra
 resources:
   - ../../apps/10-operators-namespaces.yaml
   - ../../apps/10-operators-servicemesh.yaml

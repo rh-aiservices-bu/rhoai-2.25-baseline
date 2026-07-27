@@ -7,11 +7,6 @@ kind: Application
 metadata:
   name: rhoai-2254-root
   namespace: openshift-gitops
-  labels:
-    # Selected by the RHPDS gitops-bootstrap health check
-    # (label_selectors: app.kubernetes.io/instance=bootstrap-infra).
-    # The overlays stamp this same label on every child Application.
-    app.kubernetes.io/instance: bootstrap-infra
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:

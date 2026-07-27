@@ -3,15 +3,6 @@
 # want a clean RHOAI 2.25.6 install and will deploy samples some other way.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# Label every Application so the RHPDS gitops-bootstrap health check
-# (label_selectors: app.kubernetes.io/instance={{ ocp4_workload_gitops_bootstrap_application_name }})
-# selects and waits on them. includeSelectors:false — Application objects have no
-# label selectors. Requires annotation-based resource tracking on the ArgoCD
-# instance (see bootstrap/15-argocd-config.yaml).
-labels:
-  - includeSelectors: false
-    pairs:
-      app.kubernetes.io/instance: bootstrap-infra
 resources:
   - ../../apps/10-operators-namespaces.yaml
   - ../../apps/10-operators-servicemesh.yaml
