@@ -13,7 +13,7 @@ spec:
   project: default
   source:
     repoURL: ${REPO_URL}
-    targetRevision: ${TARGET_REVISION}
+    targetRevision: "${TARGET_REVISION}"
     path: rhoai-2254-install/gitops/overlays/${OVERLAY}
   destination:
     server: https://kubernetes.default.svc

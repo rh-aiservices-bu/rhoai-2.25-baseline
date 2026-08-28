@@ -15,7 +15,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/rhpds/rhoai-migration-automation.git
-    targetRevision: 3.5
+    targetRevision: "3.5"
     path: rhoai-2254-install/30-samples/trustyai
   destination:
     server: https://kubernetes.default.svc
