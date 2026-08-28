@@ -10,7 +10,7 @@
 # Inputs (env vars or .env file in this directory):
 #   REPO_URL          Git repository URL hosting rhoai-2254-install/
 #                     (required — no default; example: https://github.com/<org>/rhoai-migrations.git)
-#   TARGET_REVISION   Git revision to track (default: main)
+#   TARGET_REVISION   Git revision to track (default: 3.5)
 #   OVERLAY           Overlay name under gitops/overlays/ (default: all)
 #
 # Usage:
@@ -28,7 +28,7 @@ if [[ -f "${SCRIPT_DIR}/.env" ]]; then
   source "${SCRIPT_DIR}/.env"
 fi
 
-: "${TARGET_REVISION:=main}"
+: "${TARGET_REVISION:=3.5}"
 : "${OVERLAY:=all}"
 
 if [[ -z "${REPO_URL:-}" ]]; then

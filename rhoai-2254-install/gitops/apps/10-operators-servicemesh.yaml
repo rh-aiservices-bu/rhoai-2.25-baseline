@@ -13,7 +13,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/rhpds/rhoai-migration-automation.git
-    targetRevision: main
+    targetRevision: 3.5
     path: rhoai-2254-install/10-operators
     directory:
       include: "servicemesh-v2.yaml"
