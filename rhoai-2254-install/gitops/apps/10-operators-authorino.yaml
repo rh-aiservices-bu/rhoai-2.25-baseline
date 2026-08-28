@@ -14,7 +14,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/rhpds/rhoai-migration-automation.git
-    targetRevision: "3.5"
+    targetRevision: "release-3.5"
     path: rhoai-2254-install/10-operators
     directory:
       include: "authorino.yaml"
