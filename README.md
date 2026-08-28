@@ -1,8 +1,8 @@
 # rhoai-migrations
 
-Scripts and manifests for standing up a Red Hat OpenShift AI (RHOAI) cluster in a known "before" state so the RHOAI **2.25.4 → 3.3.2** migration procedure can be exercised end-to-end.
+Scripts and manifests for standing up a Red Hat OpenShift AI (RHOAI) cluster in a known "before" state so the RHOAI **2.25 → 3.5** migration procedure can be exercised end-to-end. (RHOAI 3.5 is GA; the earlier revision of this repo targeted 3.3.)
 
-The install drops a cluster into exactly the configuration that each §2.x step of the migration guide expects to operate on. Once it's up, you run the migration assessment (chapter 1) and walk through the upgrade (chapter 2) against real workloads.
+The install drops a cluster into exactly the configuration that each §2.x step of the migration guide expects to operate on. Once it's up, you run the migration assessment (chapter 1) and walk through the upgrade (chapter 3) against real workloads.
 
 ## What it installs
 
@@ -11,7 +11,7 @@ Everything lives under [rhoai-2254-install/](rhoai-2254-install/) and runs in fo
 | Phase | What it does |
 | --- | --- |
 | [05-gpu/](rhoai-2254-install/05-gpu/) | Optional NFD + NVIDIA GPU Operator. **Skipped by default** — samples are CPU-only. Opt in with `INSTALL_GPU=auto` or `INSTALL_GPU=1`. |
-| [10-operators/](rhoai-2254-install/10-operators/) | Service Mesh v2, Serverless, Authorino, and the RHOAI 2.25.4 operator (pinned) |
+| [10-operators/](rhoai-2254-install/10-operators/) | Service Mesh v2, Serverless, Authorino, and the RHOAI 2.25.10 operator (pinned — the minimum source version for the 2.25→3.5 upgrade edge) |
 | [20-dsc/](rhoai-2254-install/20-dsc/) | `DSCInitialization` + `DataScienceCluster` — all components Managed, KServe in Serverless mode, ModelMesh Managed |
 | [30-samples/](rhoai-2254-install/30-samples/) | Flag-gated sample workloads covering every §2.x "Before upgrade" step: workbenches (incl. a custom upstream Jupyter image), BYON orphan ImageStream, KServe (Serverless + ModelMesh + RawDeployment), LLM ISVC, Ray, KFTO, TrustyAI, AI Pipelines, Feature Store (Feast), Llama Stack, Model Registry |
 
@@ -83,17 +83,17 @@ A successful install leaves one workload in a non-Ready state on purpose — don
 ## After the install
 
 1. (Optional but recommended for rehearsal) **Take a backup** so you can roll the cluster back and re-run the migration. See [BACKUP-RESTORE.md](BACKUP-RESTORE.md) for the four-layer approach (etcd, OADP, RHOAI config export, rhai-cli helpers) and a restore drill.
-2. Run the migration assessment (`rhai-cli lint --target-version 3.3.2`).
+2. Run the migration assessment (`rhai-cli lint --target-version 3.5`).
 3. Resolve every blocker — the [rhoai-migrate-resolver](.claude/skills/rhoai-migrate-resolver/) skill walks you through the pre-upgrade tasks step-by-step.
-4. Run the upgrade itself.
+4. Run the upgrade itself. RHOAI 3.5 is GA — subscribe to the `support-required-upgrade-3.5` channel (the cross-major 2.25→3.5 upgrade edge), then switch to `stable-3.5` after upgrade; during the upgrade you also install the JobSet operator (a Kueue dependency).
 5. Walk through post-upgrade tasks — the same skill covers this phase.
 
 ## Guided migration (Claude Code skill)
 
 A Claude Code skill, [rhoai-migrate-resolver](.claude/skills/rhoai-migrate-resolver/), walks a cluster administrator through **both** sides of the migration:
 
-- **Pre-upgrade tasks** — resolve every blocker reported by `rhai-cli lint --target-version 3.3.2`.
-- **Post-upgrade tasks** — verify the freshly-upgraded 3.3.2 cluster and walk each component's finalization work.
+- **Pre-upgrade tasks** — resolve every blocker reported by `rhai-cli lint --target-version 3.5`.
+- **Post-upgrade tasks** — verify the freshly-upgraded 3.5 cluster and walk each component's finalization work.
 
 The skill is **read-only on the cluster by default** — it recommends `oc` commands and explains *why* each change is needed (each resolver embeds the architectural rationale inline). The user can opt into "execute mode" per-resolver by saying *"run the commands"* / *"just do it"*, in which case the skill runs them with pauses after destructive steps. See the *Hard rules* section in [SKILL.md](.claude/skills/rhoai-migrate-resolver/SKILL.md).
 
@@ -118,7 +118,7 @@ bash .claude/skills/rhoai-migrate-resolver/scripts/prereqs.sh
 # After pre-upgrade prep — is every migration blocker resolved?
 bash .claude/skills/rhoai-migrate-resolver/scripts/validate.sh
 
-# After the upgrade — is the 3.3.2 cluster healthy and are the post-upgrade tasks complete?
+# After the upgrade — is the 3.5 cluster healthy and are the post-upgrade tasks complete?
 bash .claude/skills/rhoai-migrate-resolver/scripts/post-upgrade-validate.sh
 ```
 
@@ -128,5 +128,5 @@ The post-upgrade validator prefixes each output line with a component label in b
 
 ### What the skill covers
 
-- **Pre-upgrade resolvers:** [resolvers/README.md](.claude/skills/rhoai-migrate-resolver/resolvers/README.md) maps `rhai-cli` output `(GROUP, KIND, CHECK)` rows to a fix. Covers Kueue removal, KServe Serverless/ModelMesh conversion, Service Mesh 2 / Serverless / standalone Authorino uninstall, workbench image rebuilds, TrustyAI + Ray + Llama Stack backups, LLMInferenceService RHCL+template setup, and more.
-- **Post-upgrade resolvers:** [resolvers/post-upgrade/README.md](.claude/skills/rhoai-migrate-resolver/resolvers/post-upgrade/README.md) covers every component task — operator + Gateway health, model-serving finalization + 503 troubleshooting, workbench patch + deferred migration, Ray cluster migration script, AI Hub registry/catalog, Feature Store, Llama Stack recreate-from-archive, AI Pipelines post-upgrade check, TrustyAI backups/Guardrails/data-restore/GPU-deadlock, KFTO PyTorchJob verification.
+- **Pre-upgrade resolvers:** [resolvers/README.md](.claude/skills/rhoai-migrate-resolver/resolvers/README.md) maps `rhai-cli` output `(KIND, GROUP, CHECK)` rows to a fix. Covers Kueue → Removed or Unmanaged (Red Hat build of Kueue / RHBOK), KServe Serverless/ModelMesh conversion, Service Mesh 2 / Serverless / standalone Authorino uninstall, workbench image verification/rebuilds, TrustyAI + Ray + Llama Stack / OGX archives, LLMInferenceService RHCL+template setup, and more.
+- **Post-upgrade resolvers:** [resolvers/post-upgrade/README.md](.claude/skills/rhoai-migrate-resolver/resolvers/post-upgrade/README.md) covers every component task — operator health incl. JobSet install and the leftover-Service-Mesh-2-CRDs Data Science Gateway fix, model-serving finalization + 503 troubleshooting, workbench auth-model patch + deferred migration, Ray cluster migration, AI Hub registry/catalog, Feature Store, Llama Stack / OGX recreate-from-archive, AI Pipelines post-upgrade check, TrustyAI backups/Guardrails/data-restore/GPU-deadlock, KFTO PyTorchJob verification.

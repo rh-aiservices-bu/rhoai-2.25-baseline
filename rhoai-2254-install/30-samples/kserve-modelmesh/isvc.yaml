@@ -111,7 +111,7 @@ data:
 # nil-pointer dereference (servingruntime_controller.go) and crashloop, taking the whole
 # modelmeshserving component (and the DSC) Not Ready. Keep grpcEndpoint + grpcDataEndpoint.
 # The image digest below is the RHOAI 2.25.4 productized OVMS — pinned because that's
-# the version it was validated on. The install now starts at 2.25.6, where the OOTB
+# the version it was validated on. The install now starts at 2.25.10, where the OOTB
 # `ovms` template may carry a newer digest; the pinned 2.25.4 image still runs fine
 # (it's just an OVMS runtime). To match the cluster's current OOTB version exactly,
 # refresh from: oc get template ovms -n redhat-ods-applications -o yaml

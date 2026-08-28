@@ -1,6 +1,6 @@
 ---
-# Service Mesh 2 + Kiali. Required by RHOAI 2.25.6 for KServe Serverless mode —
-# will be REMOVED during migration to 3.3.3 (replaced by Service Mesh 3).
+# Service Mesh 2 + Kiali. Required by RHOAI 2.25.10 for KServe Serverless mode —
+# will be REMOVED during migration to 3.5 (replaced by Service Mesh 3).
 #
 # Jaeger is NOT subscribed: the jaeger-product package is no longer in the 4.20
 # catalogs (Red Hat replaced it with Tempo/OpenTelemetry). RHOAI's default DSCI

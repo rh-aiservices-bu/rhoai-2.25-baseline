@@ -1,6 +1,6 @@
 ---
-# Wave 5: RHOAI 2.25.6 operator Subscription. Pinned via installPlanApproval=Manual
-# + startingCSV=rhods-operator.2.25.6. The InstallPlan-approval Job lives in a
+# Wave 5: RHOAI 2.25.10 operator Subscription. Pinned via installPlanApproval=Manual
+# + startingCSV=rhods-operator.2.25.10. The InstallPlan-approval Job lives in a
 # separate Application (10-installplan-approver.yaml, wave 6) so its sync isn't
 # gated by this Application's health — the Subscription only reports Healthy after
 # the CSV is Succeeded, and the CSV can't be Succeeded until the InstallPlan is

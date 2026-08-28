@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs operator prerequisites for RHOAI 2.25.6.
+# Installs operator prerequisites for RHOAI 2.25.10.
 #
 # The three "2.x-era" operators (SM v2, Serverless, standalone Authorino) are gated
 # by env vars so install-from-assessment.sh can reproduce a partially-prepped cluster
@@ -53,11 +53,11 @@ else
 fi
 
 apply_manifest "${SCRIPT_DIR}/rhoai-operator.yaml"
-# Subscription uses installPlanApproval=Manual with startingCSV=rhods-operator.2.25.6.
-# Approve the initial install plan so 2.25.6 actually installs; future upgrade plans
-# will still require manual approval and will be ignored (keeping us pinned at 2.25.6).
+# Subscription uses installPlanApproval=Manual with startingCSV=rhods-operator.2.25.10.
+# Approve the initial install plan so 2.25.10 actually installs; future upgrade plans
+# will still require manual approval and will be ignored (keeping us pinned at 2.25.10).
 approve_installplan redhat-ods-operator 600
-wait_for_csv_succeeded redhat-ods-operator rhods-operator.2.25.6 1200
+wait_for_csv_succeeded redhat-ods-operator rhods-operator.2.25.10 1200
 
 # Wait for the DSCI/DSC CRDs the operator installs before phase 20 tries to use them.
 wait_for_crd dscinitializations.dscinitialization.opendatahub.io 300
