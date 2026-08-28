@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Read-only post-upgrade check for an RHOAI 2.25.4 → 3.3.2 migration.
+# Read-only post-upgrade check for an RHOAI 2.25.10 (and later) → 3.5 migration.
 # Covers the post-upgrade verification tasks from the migration guide.
 #
 # This script does not modify the cluster. Run as cluster-admin.
@@ -9,7 +9,7 @@
 #   WARN — unusual state, no action strictly required
 #   FAIL — real regression; run the named resolver to fix
 #   TODO — required post-upgrade user action documented in the migration guide
-#          (e.g. patching stopped workbenches, recreating LSDs from archive).
+#          (e.g. patching stopped workbenches, recreating OGXServer CRs from archive).
 #          A clean cluster with no FAILs can still have open TODOs.
 #
 # Exit code: 0 if no FAIL, 1 if any FAIL. TODOs do not fail the script.
@@ -40,14 +40,14 @@ check() {
 
 oc whoami >/dev/null 2>&1 || { echo "not logged in — run 'oc login'"; exit 1; }
 
-echo "RHOAI 2.25.4 → 3.3.2 migration — post-upgrade validation"
+echo "RHOAI 2.25.10 → 3.5 migration — post-upgrade validation"
 echo "========================================================="
 
-# [operator] RHOAI operator version is 3.3.2 (and 2.25.4 is gone)
+# [operator] RHOAI operator version is 3.5.0 (and 2.25.x is gone)
 csv_new=$(oc get csv -n redhat-ods-operator -o jsonpath='{.items[?(@.spec.displayName=="Red Hat OpenShift AI")].metadata.name}' 2>/dev/null || echo "")
 case "$csv_new" in
-  rhods-operator.3.3.2) check PASS "[operator] RHOAI operator CSV" "$csv_new" ;;
-  rhods-operator.3.*)   check WARN "[operator] RHOAI operator CSV" "$csv_new — this script targets 3.3.2 but newer 3.x may still work" ;;
+  rhods-operator.3.5.0) check PASS "[operator] RHOAI operator CSV" "$csv_new" ;;
+  rhods-operator.3.*)   check WARN "[operator] RHOAI operator CSV" "$csv_new — this script targets 3.5.0 but newer 3.x may still work" ;;
   rhods-operator.2.*)   check FAIL "[operator] RHOAI operator CSV" "$csv_new — upgrade has not completed; this is the pre-upgrade validator's job" ;;
   "")                   check FAIL "[operator] RHOAI operator CSV" "no CSV found in redhat-ods-operator" ;;
   *)                    check WARN "[operator] RHOAI operator CSV" "$csv_new — unexpected" ;;
@@ -90,6 +90,34 @@ if oc get gatewayconfigs --all-namespaces >/dev/null 2>&1; then
   fi
 else
   check WARN "[operator] Gateway API" "gatewayconfigs CRD not found — dashboard/Gateway check skipped"
+fi
+
+# [operator] Data Science Gateway must be Programmed=True (Gateway API provider).
+# A Programmed=False gateway is the classic sign of leftover Service Mesh 2 Istio CRDs
+# (networking.istio.io served only at v1beta1/v1alpha3): the OCP built-in Gateway API
+# control plane needs networking.istio.io/v1, so istiod-openshift-gateway stays 0/1 and
+# the gateway never programs — which then blocks ModelRegistry and leaves the DSC Not Ready.
+if oc get gateway data-science-gateway -n openshift-ingress >/dev/null 2>&1; then
+  dsg_prog=$(oc get gateway data-science-gateway -n openshift-ingress -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null || echo "")
+  if [[ "$dsg_prog" == "True" ]]; then
+    check PASS "[operator] data-science-gateway Programmed=True"
+  else
+    check FAIL "[operator] data-science-gateway Programmed" "status=$dsg_prog — suspect leftover Service Mesh 2 Istio CRDs (maistra networking.istio.io at v1beta1/v1alpha3 only); delete the stale *.istio.io CRDs and 'oc rollout restart deploy/ingress-operator' so the sail library reinstalls them at v1 (see operator resolver)"
+  fi
+else
+  check WARN "[operator] data-science-gateway" "gateway 'data-science-gateway' not found in openshift-ingress — skip if Gateway API is not in use"
+fi
+
+# [operator] JobSet operator installed + jobsets.jobset.x-k8s.io CRD present.
+# JobSet is a required Kueue dependency in 3.5; without it the DSC can stay Not Ready with KueueReady=False.
+if oc get crd jobsets.jobset.x-k8s.io >/dev/null 2>&1; then
+  if oc get csv -A --no-headers 2>/dev/null | grep -q 'jobset-operator\.'; then
+    check PASS "[operator] JobSet operator" "jobsets.jobset.x-k8s.io CRD present, jobset-operator CSV installed"
+  else
+    check WARN "[operator] JobSet operator" "jobsets.jobset.x-k8s.io CRD present but jobset-operator CSV not found — confirm the JobSet operator install"
+  fi
+else
+  check FAIL "[operator] JobSet operator" "jobsets.jobset.x-k8s.io CRD missing — install the JobSet operator (jobset-system, OwnNamespace OperatorGroup, sub 'job-set' channel stable-v1.0, source redhat-operators; CSV jobset-operator.v1.0.0; create JobSetOperator CR 'cluster') — required Kueue dependency"
 fi
 
 # [operator] Kueue component — status should be Ready or Removed
@@ -230,12 +258,13 @@ else
   check FAIL "[model-serving] ODH Model Controller Ready" "no Ready odh-model-controller pod"
 fi
 
-# [model-serving] All ISVCs RawDeployment + Ready
-bad_isvc=$(oc get isvc -A -o json 2>/dev/null | jq -r '.items[] | select((.status.deploymentMode // "") != "RawDeployment" or ((.status.conditions[]? | select(.type=="Ready") | .status) // "False") != "True") | "\(.metadata.namespace)/\(.metadata.name)=mode:\(.status.deploymentMode // "unknown"),ready:\((.status.conditions[]? | select(.type=="Ready") | .status) // "unknown")"')
+# [model-serving] All ISVCs Standard deployment mode + Ready
+# In 3.5 the DEPLOYMENT_MODE column renamed "RawDeployment" → "Standard"; accept either value.
+bad_isvc=$(oc get isvc -A -o json 2>/dev/null | jq -r '.items[] | select((.status.deploymentMode // "") as $m | ($m != "Standard" and $m != "RawDeployment") or ((.status.conditions[]? | select(.type=="Ready") | .status) // "False") != "True") | "\(.metadata.namespace)/\(.metadata.name)=mode:\(.status.deploymentMode // "unknown"),ready:\((.status.conditions[]? | select(.type=="Ready") | .status) // "unknown")"')
 if [[ -z "$bad_isvc" ]]; then
-  check PASS "[model-serving] InferenceServices RawDeployment + Ready"
+  check PASS "[model-serving] InferenceServices Standard (Raw) + Ready"
 else
-  check FAIL "[model-serving] InferenceServices RawDeployment + Ready" "$(echo "$bad_isvc" | tr '\n' ';')"
+  check FAIL "[model-serving] InferenceServices Standard (Raw) + Ready" "$(echo "$bad_isvc" | tr '\n' ';')"
 fi
 
 # [model-serving] LLMInferenceServices
@@ -314,7 +343,7 @@ unmigrated_nb=$(oc get notebook -A -o json 2>/dev/null | jq -r '
 ')
 if [[ "${unmigrated_nb:-0}" -gt 0 ]]; then
   check TODO "[workbenches] patch ${unmigrated_nb} unmigrated workbench(es)" \
-    "run workbench-2.x-to-3.x-upgrade.sh patch --only-stopped --with-cleanup -y (see workbenches.md)"
+    "run 'rhai-cli migrate run --migration workbenches.patch-auth-model --target-version 3.5.0 --only-stopped --with-cleanup' (prompts for confirmation twice; see workbenches.md)"
 fi
 
 # [workbenches] TODO — custom BYON ImageStreams in redhat-ods-applications won't survive the ns refresh
@@ -339,7 +368,7 @@ rc_unmigrated=$(oc get raycluster -A -o json 2>/dev/null | jq -r '
 ')
 if [[ "${rc_unmigrated:-0}" -gt 0 ]]; then
   check TODO "[ray] migrate ${rc_unmigrated} RayCluster(s) to 3.x KubeRay conventions" \
-    "run ray_cluster_migration.py post-upgrade (prerequisite: workbenches resolver complete) — see ray.md"
+    "run 'rhai-cli migrate run --migration raycluster.migrate --target-version 3.5.0' (prerequisite: workbenches resolver complete) — see ray.md"
 fi
 
 # [model-serving] TODO — inferenceservice-config ConfigMap must be flipped back to managed=true
@@ -348,15 +377,15 @@ ifs_managed=$(oc get configmap inferenceservice-config -n redhat-ods-application
 case "$ifs_managed" in
   true)  check PASS "[model-serving] inferenceservice-config managed=true" ;;
   false) check TODO "[model-serving] restore inferenceservice-config managed=true" \
-           "was set to false pre-upgrade; flip back + rollout restart kserve-controller-manager (see model-serving.md)" ;;
+           "run 'rhai-cli migrate run --migration modelserving.managed-isvc-config --target-version 3.5.0' (flips managed back to true + restarts kserve-controller-manager; see model-serving.md)" ;;
   "")    : ;; # annotation absent — common on fresh 3.x installs, nothing to do
   *)     check WARN "[model-serving] inferenceservice-config managed=$ifs_managed" "unexpected value" ;;
 esac
 
 # [pipelines] TODO — admin runs post_upgrade_check.sh; users validate pipelines
 if oc get dspa -A --no-headers 2>/dev/null | grep -q .; then
-  check TODO "[pipelines] run post_upgrade_check.sh and have users validate pipelines" \
-    "per-DSPA health + user task: import/execute/scheduled-runs check (see pipelines.md)"
+  check TODO "[pipelines] run ai-pipelines.post-upgrade-check and have users validate pipelines" \
+    "run 'rhai-cli migrate run --migration ai-pipelines.post-upgrade-check --target-version 3.5.0' (compares against the saved dspa_pre_upgrade_pods.json baseline), then user task: import/execute/scheduled-runs check (see pipelines.md)"
 fi
 
 # [registry] TODO — announce dashboard nav change (Models → AI hub)
@@ -365,16 +394,30 @@ if oc get modelregistry.modelregistry.opendatahub.io -A --no-headers 2>/dev/null
     "registry + catalog pods are fine; users searching 'Model registry' won't find it (see registry-catalog.md)"
 fi
 
-# [llama-stack] TODO — if LSD CRD exists, user needs to recreate LSDs from pre-upgrade archive
-if oc get crd llamastackdistributions.llamastack.io >/dev/null 2>&1 \
-   || oc get crd llamastackdistributions.llamastack.opendatahub.io >/dev/null 2>&1; then
-  lsd_count=$(oc get llamastackdistribution -A --no-headers 2>/dev/null | wc -l | tr -d ' ')
-  if [[ "${lsd_count:-0}" -eq 0 ]]; then
-    check TODO "[llama-stack] recreate LSDs from pre-upgrade archive" \
-      "data (agent state, telemetry, vector DBs) was lost by design; skip if you didn't use Llama Stack in 2.25 (see llama-stack.md)"
+# [ogx] TODO — Llama Stack is renamed OGX (Open GenAI Stack) in 3.5. LlamaStackDistribution CRs
+# were deleted before upgrade and must be recreated as OGXServer (v1beta1) CRs from the archive.
+# Detect the OGXServer CRD (group-agnostic); fall back to a lingering legacy LSD CRD.
+ogx_crd=$(oc get crd -o name 2>/dev/null | grep -iE '(^|/)ogxservers\.' | head -n1)
+lsd_crd=$(oc get crd -o name 2>/dev/null | grep -iE '(^|/)llamastackdistributions\.' | head -n1)
+if [[ -n "$ogx_crd" || -n "$lsd_crd" ]]; then
+  ogx_count=$(oc get ogxserver -A --no-headers 2>/dev/null | wc -l | tr -d ' ')
+  if [[ "${ogx_count:-0}" -eq 0 ]]; then
+    check TODO "[ogx] recreate OGXServer CRs from pre-upgrade archive" \
+      "Llama Stack → OGX rename: recreate former LlamaStackDistribution CRs as OGXServer (v1beta1) using the llamastack.backup archive as reference; data (agent state, telemetry, vector DBs) was lost by design; skip if you didn't use Llama Stack in 2.25 (see llama-stack.md)"
   else
-    check PASS "[llama-stack] LSDs present" "$lsd_count"
+    check PASS "[ogx] OGXServer CRs present" "$ogx_count"
   fi
+fi
+
+# [training] TODO — verify Kubeflow v1 training workloads are ready for Trainer v2.
+# Read-only enumeration of PyTorchJob/TFJob/MPIJob/XGBoostJob; any still Running/Created is a blocker.
+kfto_present=0
+for k in pytorchjob tfjob mpijob xgboostjob; do
+  if oc get "$k" -A --no-headers 2>/dev/null | grep -q .; then kfto_present=1; break; fi
+done
+if (( kfto_present == 1 )); then
+  check TODO "[training] verify Kubeflow v1 training workloads (Trainer v2 readiness)" \
+    "run 'rhai-cli migrate run --migration training.verify-workloads --target-version 3.5.0' (read-only enumeration; reports [BLOCKER] for any workload still Running/Created — see training.md)"
 fi
 
 # [trustyai] TODO — check backups vs live + restore if data loss

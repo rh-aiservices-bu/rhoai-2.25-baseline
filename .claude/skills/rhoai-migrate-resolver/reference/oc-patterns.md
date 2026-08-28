@@ -114,15 +114,14 @@ Never rely on the user's current context (`oc project`). Every resolver command 
 Always put `--` between the pod and the command. For anything non-trivial use `bash -c '<script>'`:
 
 ```sh
-oc exec -n rhai-migration rhai-cli-0 -- /opt/rhai-cli/bin/rhai-cli lint --target-version 3.3.2
+oc exec -n rhai-migration rhai-cli-0 -- /opt/rhai-cli/bin/rhai-cli lint --target-version 3.5
 
-oc exec -n rhai-migration rhai-cli-0 -- bash -c '
-  cd /opt/rhai-upgrade-helpers/workbenches && \
-  ./workbench-2.x-to-3.x-upgrade.sh patch --only-stopped --with-cleanup -y
-'
+oc exec -n rhai-migration rhai-cli-0 -- /opt/rhai-cli/bin/rhai-cli \
+  migrate run --migration workbenches.patch-auth-model --target-version 3.5.0 \
+  --only-stopped --with-cleanup
 ```
 
-For helpers that expect a TTY prompt, pass `-y` / `--yes` or the tool will exit immediately since `oc exec` without `-it` is non-interactive.
+In 3.5 the `/opt/rhai-upgrade-helpers/*.sh` scripts are gone — component work runs through `rhai-cli migrate` actions (see §16). Some `migrate` actions still prompt for interactive confirmation (e.g. `workbenches.patch-auth-model` prompts twice). Since `oc exec` without `-it` is non-interactive, add `-it` when a prompt is expected, or check the action's flags for a non-interactive `-y`/`--yes` equivalent.
 
 `oc cp` is the read-only equivalent for extracting files:
 
@@ -146,7 +145,7 @@ For CSVs and other resources without a convenient condition, poll with a bash lo
 ```sh
 deadline=$(( $(date +%s) + 900 ))
 while (( $(date +%s) < deadline )); do
-  phase=$(oc get csv -n redhat-ods-operator rhods-operator.2.25.4 -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+  phase=$(oc get csv -n redhat-ods-operator rhods-operator.2.25.10 -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
   [[ "$phase" == "Succeeded" ]] && break
   sleep 10
 done
@@ -234,8 +233,15 @@ Because the CRDs use the `<group>.<group>.<root>` doubled pattern, `-o name` emi
 | DataScienceCluster | `datasciencecluster.datasciencecluster.opendatahub.io/<name>` |
 | DSCInitialization | `dscinitialization.dscinitialization.opendatahub.io/<name>` |
 | DataSciencePipelinesApplication | `datasciencepipelinesapplication.datasciencepipelinesapplications.opendatahub.io/<name>` |
+| OGXServer *(3.5, v1beta1)* | `ogxservers.llamastack.io/<name>` |
+| GatewayConfig *(3.5, Data Science Gateway)* | `gatewayconfigs.services.platform.opendatahub.io/<name>` |
 
 Use the short kind (`dsc`, `dsci`, `dspa`) for direct args. Use `$(oc get <short> -o name)` (without re-specifying the kind) when composing.
+
+**New in 3.5:**
+
+- **`OGXServer` (`ogxservers.llamastack.io`, v1beta1)** replaces `LlamaStackDistribution` — Llama Stack was rebranded OGX (Open GenAI Stack). Pre-upgrade CRs are `LlamaStackDistribution`; post-upgrade they are recreated as `OGXServer`. Note the group here is `llamastack.io` (not the doubled `<group>.<group>.opendatahub.io` pattern), so `-o name` emits `ogxservers.llamastack.io/<name>` directly.
+- **`GatewayConfig` (`gatewayconfigs.services.platform.opendatahub.io`)** is the Data Science Gateway config that replaces 2.x Routes for RHOAI-managed ingress (see §14, `oc expose` / Gateway API). Cluster-scoped instances exist — see §4 for when to drop `-n`.
 
 ## 13. `oc api-resources` / `oc explain` — use when uncertain
 
@@ -376,3 +382,25 @@ Already covered in §13 above. Worth repeating: when in doubt about a field, `oc
 
 - Resolvers (pre- and post-upgrade) are the canonical source. When you emit a command, prefer one that appears verbatim in the matching resolver.
 - If a resolver's command is subtly wrong for the user's cluster (e.g., different namespace, different ISVC name), edit the command inline and note what changed — **do not silently substitute unrelated changes**.
+
+## 16. `rhai-cli migrate` actions (replaces the old helper scripts)
+
+In 3.5 the per-component `/opt/rhai-upgrade-helpers/*.sh` (and `.py`) scripts no longer ship. Backups, pre/post-upgrade checks, and conversions all run as **`rhai-cli migrate` actions** invoked inside the rhai-cli pod. The general form:
+
+```sh
+oc exec -n rhai-migration rhai-cli-0 -- /opt/rhai-cli/bin/rhai-cli \
+  migrate <run|prepare|list> --migration <name> --target-version 3.5.0 [flags]
+```
+
+- **`migrate run`** — perform the action (checks, conversions, patches). Auto-detects pre- vs post-upgrade phase; post-upgrade actions emit a benign `phase pre-upgrade but effective phase is post-upgrade` warning that is safe to ignore.
+- **`migrate prepare`** — take a backup / write a baseline snapshot before mutating anything (e.g. `llamastack.backup`, `trustyai.data`, `ai-pipelines.pre-upgrade-check`).
+- **`migrate list`** — enumerate what would be acted on. On several actions the old script's status table is now surfaced via `--dry-run` on `run` instead (`=== DRY RUN MODE ===`, `Summary: N to migrate, M already migrated`).
+
+Common flags:
+
+- `--migration <name>` — the action, dotted `component.action` form (e.g. `modelserving.serverless-to-raw`, `raycluster.backup`, `workbenches.patch-auth-model`, `training.verify-workloads`). Each resolver names the specific value.
+- `--target-version 3.5.0` — required on migrate actions (note the full `3.5.0`; `lint` uses the shorter `--target-version 3.5`).
+- `--dry-run` — preview without mutating.
+- `--output-dir <path>` — where backups/snapshots are written. **Required when a `prepare` action runs inside the pod** (the container root filesystem is read-only; without it you get `permission denied`). Point it at the mounted PVC, e.g. `--output-dir /tmp/rhoai-upgrade-backup`.
+
+`jq` is no longer present in the container — pipe verification output back to the workstation instead (`oc exec … rhai-cli-0 -- … | jq …`). Some `run` actions prompt interactively — see §6 for the `oc exec -it` note.

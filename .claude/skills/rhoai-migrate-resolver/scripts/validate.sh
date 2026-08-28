@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Read-only final-readiness check for an RHOAI 2.25.4 → 3.3.2 migration.
+# Read-only final-readiness check for an RHOAI 2.25.10 (and later) → 3.5 migration.
 # Complements 'rhai-cli lint' — verifies every migration blocker identified by the
 # 2.x → 3.x migration guide has been resolved.
 #
@@ -31,7 +31,7 @@ check() {
 
 oc whoami >/dev/null 2>&1 || { echo "not logged in — run 'oc login'"; exit 1; }
 
-echo "RHOAI 2.25.4 → 3.3.2 migration — readiness validation"
+echo "RHOAI 2.25.10 → 3.5 migration — readiness validation"
 echo "======================================================"
 
 # §2.1 cert-manager
@@ -41,12 +41,30 @@ else
   check FAIL "§2.1 cert-manager Operator installed" "install from OperatorHub → 'cert-manager Operator for Red Hat OpenShift'"
 fi
 
-# §2.2 Kueue = Removed
+# §2.2 Kueue = Removed OR Unmanaged (3.5 accepts both; Managed is rejected at runtime)
+# Unmanaged integrates an externally installed Red Hat build of Kueue (RHBOK) operator,
+# which must be installed and operational first.
 kueue_state=$(oc get dsc -o jsonpath='{.items[0].spec.components.kueue.managementState}' 2>/dev/null || echo "")
 case "$kueue_state" in
   Removed) check PASS "§2.2 kueue.managementState" "Removed" ;;
+  Unmanaged)
+    if oc get csv -A 2>/dev/null | grep -q 'kueue-operator\.'; then
+      check PASS "§2.2 kueue.managementState" "Unmanaged — external Red Hat build of Kueue (RHBOK) operator installed"
+    else
+      check FAIL "§2.2 kueue.managementState" "Unmanaged but no external Red Hat build of Kueue (RHBOK) operator found — install RHBOK first, or set kueue to Removed"
+    fi
+    ;;
   "")     check FAIL "§2.2 kueue.managementState" "not set — DSC missing or kueue block absent" ;;
-  *)      check FAIL "§2.2 kueue.managementState" "$kueue_state — must be Removed before upgrade" ;;
+  *)      check FAIL "§2.2 kueue.managementState" "$kueue_state — must be Removed or Unmanaged (external RHBOK) before upgrade; Managed is rejected at runtime in 3.5" ;;
+esac
+
+# §2.12 CodeFlare = Removed (new 3.5 requirement — CodeFlare is removed in 3.5 and must be
+# disabled before upgrading, even with no RayClusters; raycluster.backup fails if still Managed)
+codeflare_state=$(oc get dsc -o jsonpath='{.items[0].spec.components.codeflare.managementState}' 2>/dev/null || echo "")
+case "$codeflare_state" in
+  Removed) check PASS "§2.12 codeflare.managementState" "Removed" ;;
+  "")      check WARN "§2.12 codeflare.managementState" "not set — codeflare block absent (treated as not Managed); confirm CodeFlare is disabled" ;;
+  *)       check FAIL "§2.12 codeflare.managementState" "$codeflare_state — CodeFlare is removed in 3.5 and must be set to Removed before upgrade" ;;
 esac
 
 # §2.6 workbenches — all Stopped
@@ -59,58 +77,58 @@ if running=$(oc get notebooks -A -o json 2>/dev/null | jq -r '.items[] | select(
   fi
 fi
 
-# §2.8.7 No Serverless ISVCs remain
+# §2.10.7 No Serverless ISVCs remain
 sl_count=$(oc get isvc -A -o json 2>/dev/null | jq '[.items[] | select((.metadata.annotations."serving.kserve.io/deploymentMode" // "") == "Serverless" or (.status.deploymentMode // "") == "Serverless")] | length')
 if [[ "${sl_count:-0}" == "0" ]]; then
-  check PASS "§2.8.7.1 Serverless InferenceServices" "none remain"
+  check PASS "§2.10.7.1 Serverless InferenceServices" "none remain"
 else
-  check FAIL "§2.8.7.1 Serverless InferenceServices" "$sl_count still in Serverless mode — convert to RawDeployment"
+  check FAIL "§2.10.7.1 Serverless InferenceServices" "$sl_count still in Serverless mode — convert to RawDeployment"
 fi
 
-# §2.8.7 No ModelMesh ISVCs remain
+# §2.10.7 No ModelMesh ISVCs remain
 mm_count=$(oc get isvc -A -o json 2>/dev/null | jq '[.items[] | select((.metadata.annotations."serving.kserve.io/deploymentMode" // "") == "ModelMesh" or (.status.deploymentMode // "") == "ModelMesh")] | length')
 if [[ "${mm_count:-0}" == "0" ]]; then
-  check PASS "§2.8.7.2 ModelMesh InferenceServices" "none remain"
+  check PASS "§2.10.7.2 ModelMesh InferenceServices" "none remain"
 else
-  check FAIL "§2.8.7.2 ModelMesh InferenceServices" "$mm_count still in ModelMesh mode — convert to RawDeployment"
+  check FAIL "§2.10.7.2 ModelMesh InferenceServices" "$mm_count still in ModelMesh mode — convert to RawDeployment"
 fi
 
-# §2.8.9 DSC kserve.serving = Removed
+# §2.10.9 DSC kserve.serving = Removed
 kserve_serving=$(oc get dsc -o jsonpath='{.items[0].spec.components.kserve.serving.managementState}' 2>/dev/null || echo "")
 case "$kserve_serving" in
-  Removed) check PASS "§2.8.9 kserve.serving.managementState" "Removed" ;;
-  *)       check FAIL "§2.8.9 kserve.serving.managementState" "$kserve_serving — must be Removed" ;;
+  Removed) check PASS "§2.10.9 kserve.serving.managementState" "Removed" ;;
+  *)       check FAIL "§2.10.9 kserve.serving.managementState" "$kserve_serving — must be Removed" ;;
 esac
 
-# §2.8.9 DSC modelmeshserving = Removed
+# §2.10.9 DSC modelmeshserving = Removed
 mm_state=$(oc get dsc -o jsonpath='{.items[0].spec.components.modelmeshserving.managementState}' 2>/dev/null || echo "")
 case "$mm_state" in
-  Removed) check PASS "§2.8.9 modelmeshserving.managementState" "Removed" ;;
-  *)       check FAIL "§2.8.9 modelmeshserving.managementState" "$mm_state — must be Removed" ;;
+  Removed) check PASS "§2.10.9 modelmeshserving.managementState" "Removed" ;;
+  *)       check FAIL "§2.10.9 modelmeshserving.managementState" "$mm_state — must be Removed" ;;
 esac
 
-# §2.8.9 DSCI serviceMesh = Removed
+# §2.10.9 DSCI serviceMesh = Removed
 sm_state=$(oc get dsci -o jsonpath='{.items[0].spec.serviceMesh.managementState}' 2>/dev/null || echo "")
 case "$sm_state" in
-  Removed) check PASS "§2.8.9 DSCI serviceMesh.managementState" "Removed" ;;
-  *)       check FAIL "§2.8.9 DSCI serviceMesh.managementState" "$sm_state — must be Removed" ;;
+  Removed) check PASS "§2.10.9 DSCI serviceMesh.managementState" "Removed" ;;
+  *)       check FAIL "§2.10.9 DSCI serviceMesh.managementState" "$sm_state — must be Removed" ;;
 esac
 
-# §2.8.9 OpenShift Serverless uninstalled
+# §2.10.9 OpenShift Serverless uninstalled
 if oc get csv -A 2>/dev/null | grep -q 'serverless-operator\.'; then
-  check FAIL "§2.8.9 OpenShift Serverless" "still installed — uninstall before upgrade"
+  check FAIL "§2.10.9 OpenShift Serverless" "still installed — uninstall before upgrade"
 else
-  check PASS "§2.8.9 OpenShift Serverless" "uninstalled"
+  check PASS "§2.10.9 OpenShift Serverless" "uninstalled"
 fi
 
-# §2.8.9 Service Mesh v2 uninstalled
+# §2.10.9 Service Mesh v2 uninstalled
 if oc get csv -A 2>/dev/null | grep -qE 'servicemeshoperator\.v2\.'; then
-  check FAIL "§2.8.9 Service Mesh v2" "servicemeshoperator v2 still installed — uninstall (or upgrade to v3 if other workloads need it)"
+  check FAIL "§2.10.9 Service Mesh v2" "servicemeshoperator v2 still installed — uninstall (or upgrade to v3 if other workloads need it)"
 else
-  check PASS "§2.8.9 Service Mesh v2" "uninstalled"
+  check PASS "§2.10.9 Service Mesh v2" "uninstalled"
 fi
 
-# §2.8.9 Standalone Authorino
+# §2.10.9 Standalone Authorino
 # RHCL (rhcl-operator) pulls in authorino-operator as a dependency. Per
 # resolvers/kserve.md § "Uninstall standalone Authorino": do NOT uninstall the
 # operator if RHCL is installed — RHCL owns it.
@@ -119,11 +137,11 @@ if oc get csv -A 2>/dev/null | grep -q 'rhcl-operator\.'; then rhcl_present=1; f
 authorino_present=0
 if oc get csv -n openshift-operators 2>/dev/null | grep -q 'authorino-operator\.'; then authorino_present=1; fi
 if (( rhcl_present == 1 )); then
-  check PASS "§2.8.9 Authorino" "RHCL installed — RHCL manages authorino-operator (standalone uninstall not required)"
+  check PASS "§2.10.9 Authorino" "RHCL installed — RHCL manages authorino-operator (standalone uninstall not required)"
 elif (( authorino_present == 1 )); then
-  check FAIL "§2.8.9 standalone Authorino" "authorino-operator present and RHCL not installed — install RHCL (which bundles Authorino) or uninstall the standalone operator"
+  check FAIL "§2.10.9 standalone Authorino" "authorino-operator present and RHCL not installed — install RHCL (which bundles Authorino) or uninstall the standalone operator"
 else
-  check PASS "§2.8.9 standalone Authorino" "uninstalled"
+  check PASS "§2.10.9 standalone Authorino" "uninstalled"
 fi
 
 # llm-d readiness — Kuadrant CR + Authorino TLS
@@ -155,13 +173,19 @@ else
   check WARN "DSC phase" "$dsc_phase — expected Ready; transient mid-reconciliation is OK"
 fi
 
-# §2.10 RHOAI operator version — should still be 2.25.4 until chapter 3
+# §2.12 RHOAI operator version — should still be 2.25.10 (or later 2.25.x) until chapter 3
 csv_name=$(oc get csv -n redhat-ods-operator -o jsonpath='{.items[?(@.spec.displayName=="Red Hat OpenShift AI")].metadata.name}' 2>/dev/null || echo "")
 case "$csv_name" in
-  rhods-operator.2.25.4) check PASS "§2.10 RHOAI operator" "$csv_name (ready for chapter-3 upgrade)" ;;
-  rhods-operator.2.25.*) check WARN "§2.10 RHOAI operator" "$csv_name — this skill targets 2.25.4" ;;
-  "")                    check FAIL "§2.10 RHOAI operator" "not found in redhat-ods-operator namespace" ;;
-  *)                     check WARN "§2.10 RHOAI operator" "$csv_name — unexpected version" ;;
+  rhods-operator.2.25.*)
+    patch="${csv_name##*.}"
+    if [[ "$patch" =~ ^[0-9]+$ ]] && (( patch >= 10 )); then
+      check PASS "§2.12 RHOAI operator" "$csv_name (≥ 2.25.10 — ready for chapter-3 upgrade to 3.5)"
+    else
+      check WARN "§2.12 RHOAI operator" "$csv_name — the 2.25→3.5 path requires 2.25.10 or later; update to a 2.25.10+ z-stream first"
+    fi
+    ;;
+  "")                    check FAIL "§2.12 RHOAI operator" "not found in redhat-ods-operator namespace" ;;
+  *)                     check WARN "§2.12 RHOAI operator" "$csv_name — unexpected version (this skill targets 2.25.10 and later)" ;;
 esac
 
 echo
@@ -172,4 +196,4 @@ if (( FAIL > 0 )); then
   echo "Not ready to upgrade — resolve FAIL items first, then re-run 'rhai-cli lint'."
   exit 1
 fi
-echo "All migration blockers resolved. Run 'rhai-cli lint --target-version 3.3.2' once more to confirm, then proceed to chapter 3."
+echo "All migration blockers resolved. Run 'rhai-cli lint --target-version 3.5' once more to confirm, then proceed to chapter 3: switch the operator to the 'support-required-upgrade-3.5' channel and approve the InstallPlan to upgrade to 3.5."

@@ -4,6 +4,8 @@
 
 Four sub-steps, run in order. Do not skip ahead — each one assumes the previous one is clean.
 
+> **Note on the `trustyai.*` migrate actions below.** The guardrails, otel-exporter, restore-metrics, and GPU-deadlock steps are now `rhai-cli migrate run --migration trustyai.<action> --target-version 3.5.0` actions (`patch-guardrails`, `migrate-gorch-otel-exporter`, `metrics`, `break-gpu-deadlock`). They operate **cluster-wide across all namespaces** — they replace the old per-namespace `*.sh` loops, so there is no `$NS` to set. Preview any of them with `--dry-run` before applying. Each may print a benign `WARNING: migration <name> has phase pre-upgrade but effective phase is post-upgrade` — ignore it.
+
 ## Check backups
 
 Figure out whether any TrustyAIService lost data during the schema upgrade.
@@ -44,7 +46,7 @@ Compare the live count to the backup count — if live < backup, that namespace 
 
 ## Guardrails
 
-Migration guide §4.6.2 prescribes a five-step procedure for every GuardrailsOrchestrator. The official helpers do most of the work — earlier revisions of this resolver missed them.
+Migration guide §4.6.2 prescribes a five-step procedure for every GuardrailsOrchestrator. The `trustyai.*` migrate actions do most of the work cluster-wide — earlier revisions of this resolver missed them.
 
 ### Step 1 — list and identify
 
@@ -54,33 +56,33 @@ oc get guardrailsorchestrator -A
 
 If `No resources found`, skip this entire section.
 
-### Step 2 — patch deployments missing the ReadinessProbe (`patch-guardrails-deployment.sh`)
+### Step 2 — patch deployments missing the ReadinessProbe (`trustyai.patch-guardrails`)
 
-For each `(namespace, orchestrator)` pair:
-
-```
-export NS=<namespace>
-export GORCH_NAME=<orchestrator-name>
-
-cd /opt/rhai-upgrade-helpers/trustyai
-
-./patch-guardrails-deployment.sh --gorch-name $GORCH_NAME --namespace $NS --check
-# If output is "OK readinessProbe already set" → next namespace.
-# If output is "NEEDS PATCH":
-./patch-guardrails-deployment.sh --gorch-name $GORCH_NAME --namespace $NS --fix
-# Script edits the deployment and waits for rollout to complete.
-```
-
-### Step 3 — check otelExporter schema (`migrate-gorch-otel-exporter.sh`)
+Cluster-wide — run it once, no per-namespace loop. Preview, then apply:
 
 ```
-./migrate-gorch-otel-exporter.sh --namespace $NS --check
-# If output is "already on new otelExporter schema" → skip step 4.
-# Otherwise:
-./migrate-gorch-otel-exporter.sh --namespace $NS --fix
+# Preview — reports which GuardrailsOrchestrator deployments need the ReadinessProbe
+oc exec -n rhai-migration rhai-cli-0 -- \
+  rhai-cli migrate run --migration trustyai.patch-guardrails --target-version 3.5.0 --dry-run
+
+# Apply — edits each deployment and waits for rollout
+oc exec -n rhai-migration rhai-cli-0 -- \
+  rhai-cli migrate run --migration trustyai.patch-guardrails --target-version 3.5.0
 ```
 
-The helper rewrites keys under `spec.otelExporter` to the 3.x shape. Use it before any hand-patching.
+### Step 3 — migrate otelExporter schema (`trustyai.migrate-gorch-otel-exporter`)
+
+Also cluster-wide. Preview, then apply:
+
+```
+oc exec -n rhai-migration rhai-cli-0 -- \
+  rhai-cli migrate run --migration trustyai.migrate-gorch-otel-exporter --target-version 3.5.0 --dry-run
+
+oc exec -n rhai-migration rhai-cli-0 -- \
+  rhai-cli migrate run --migration trustyai.migrate-gorch-otel-exporter --target-version 3.5.0
+```
+
+The action rewrites keys under `spec.otelExporter` to the 3.x shape across every namespace. Use it before any hand-patching.
 
 ### Step 4 — verify each orchestrator via /info
 
@@ -94,7 +96,7 @@ All listed services should report `status: HEALTHY`.
 
 ---
 
-The sections below are operational gotchas observed on real clusters — not in migration guide §4.6.2. Keep them as fallback after the official helpers have run.
+The sections below are operational gotchas observed on real clusters — not in migration guide §4.6.2. Keep them as fallback after the `trustyai.*` migrate actions have run.
 
 ### Gotcha 1 — missing orchestratorConfig ConfigMap
 
@@ -156,21 +158,19 @@ The migration guide's TrustyAI "Restore data" section provides a long sequence:
 2. Port-forward to the service
 3. Replay each backed-up metric via the `POST /metrics/*` endpoints
 
-Use the helper if available. It requires **both** `--namespace` and `--file` (missing `-f` produces `[ERROR] Backup file is required. Use -f flag.`):
+Use the `trustyai.metrics` action. It operates **cluster-wide** — it discovers the per-namespace `trustyai-metrics-*.json` backups captured by the pre-upgrade `trustyai.data` step and replays them into each TrustyAIService, so there is no `--namespace`/`--file` to set. Preview first with `--dry-run`, then apply:
 
 ```
-NS=<ns>
-BACKUP_FILE=$(oc exec -n rhai-migration rhai-cli-0 -- bash -c \
-  "ls /tmp/rhoai-upgrade-backup/trustyai/trustyai-metrics-${NS}-*.json 2>/dev/null | tail -1")
-
+# Preview — reports which namespaces/metrics would be restored
 oc exec -n rhai-migration rhai-cli-0 -- \
-  bash /opt/rhai-upgrade-helpers/trustyai/restore-metrics.sh \
-  --namespace "$NS" --file "$BACKUP_FILE"
+  rhai-cli migrate run --migration trustyai.metrics --target-version 3.5.0 --dry-run
+
+# Apply — idempotent; skips metrics that already exist (by model ID + metric type)
+oc exec -n rhai-migration rhai-cli-0 -- \
+  rhai-cli migrate run --migration trustyai.metrics --target-version 3.5.0
 ```
 
-The script also supports `-d/--dry-run` (preview without applying) and `-s/--skip-existing` (idempotent re-run, checks by model ID + metric type).
-
-If the helper is not present in your image, walk the migration guide's "TrustyAI - After upgrade - Restore data" section by hand — it covers ~40 steps of port-forwarding + curl POST per metric, and is too long to mirror here. Do not improvise a different approach: TrustyAI metrics have internal consistency constraints that fail silently if uploaded in the wrong order.
+If the action reports no backups (or is unavailable in your image), walk the migration guide's "TrustyAI - After upgrade - Restore data" section by hand — it covers ~40 steps of port-forwarding + curl POST per metric, and is too long to mirror here. Do not improvise a different approach: TrustyAI metrics have internal consistency constraints that fail silently if uploaded in the wrong order.
 
 ## GPU deployment deadlock
 
@@ -182,23 +182,20 @@ If the helper is not present in your image, walk the migration guide's "TrustyAI
 oc get pods -A | grep predictor
 # Look for one namespace with a mix of Running and 0/2 Pending predictor pods
 
-oc exec -n rhai-migration rhai-cli-0 -- bash -c '
-  cd /opt/rhai-upgrade-helpers/trustyai && \
-  ./break-gpu-deadlock.sh --namespace <namespace> --check
-'
-# Output is either "No deadlocks detected" or "DEADLOCK: <predictor-list>"
+# --dry-run scans all namespaces and reports deadlocks without deleting anything
+oc exec -n rhai-migration rhai-cli-0 -- \
+  rhai-cli migrate run --migration trustyai.break-gpu-deadlock --target-version 3.5.0 --dry-run
+# Output is either "No deadlocks detected" or "DEADLOCK: <namespace>/<predictor-list>"
 ```
 
-**Fix** (destructive — deletes the older pod so the scheduler can place the new one):
+**Fix** (destructive — deletes the older pod so the scheduler can place the new one). Cluster-wide across all namespaces:
 
 ```
-oc exec -n rhai-migration rhai-cli-0 -- bash -c '
-  cd /opt/rhai-upgrade-helpers/trustyai && \
-  ./break-gpu-deadlock.sh --namespace <namespace> --fix
-'
+oc exec -n rhai-migration rhai-cli-0 -- \
+  rhai-cli migrate run --migration trustyai.break-gpu-deadlock --target-version 3.5.0
 ```
 
-The script waits for the new pod to become Running before returning. If it fails, do not retry blindly — `oc describe pod` on the still-pending pod and check GPU allocatable on the node (`oc describe node <node>`).
+The action waits for the new pod to become Running before returning. If it fails, do not retry blindly — `oc describe pod` on the still-pending pod and check GPU allocatable on the node (`oc describe node <node>`).
 
 ## Verify (all sub-steps)
 

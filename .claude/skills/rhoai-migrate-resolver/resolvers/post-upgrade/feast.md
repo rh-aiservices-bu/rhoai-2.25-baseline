@@ -4,7 +4,7 @@
 
 ## Why
 
-Feature Store was Tech Preview in 2.25.4 and goes GA in 3.3.2. The component itself is functionally unchanged between versions — only the support status moves. No architectural change driver.
+Feature Store was Tech Preview in 2.25 and goes **GA in 3.5**. The component itself is functionally unchanged between versions — only the support status moves. No architectural change driver.
 
 Skip this section entirely if you didn't use Feature Store in 2.25.
 
@@ -45,13 +45,13 @@ oc get jobs -n "$NS"
 
 ### Step 4 — dashboard verification (user task)
 
-> **The dashboard URL changed at 3.x.** Migration guide §4.3 says: "The URL for the OpenShift AI 3.3.2 dashboard uses Gateway API access and is different from the 2.25.4 URL. The 2.25.4 dashboard URL is no longer accessible. If you have bookmarked the OpenShift AI dashboard URL, you must update the bookmark to point to the 3.3.2 URL."
+> **The dashboard URL changed at 3.x.** Migration guide §4.3 says: "The URL for the OpenShift AI 3.5 dashboard uses Gateway API access and is different from the 2.25 URL. The 2.25 dashboard URL is no longer accessible. If you have bookmarked the OpenShift AI dashboard URL, you must update the bookmark to point to the 3.5 URL."
 >
 > Earlier revisions of this resolver claimed "Feature Store does not move in the dashboard nav between 2.x and 3.x. Users can use their existing bookmarks." Both halves were wrong. Drop them.
 
 Tell each Feature Store user to:
 
-1. Open the new 3.3.2 dashboard (Gateway API URL — `oc get gatewayconfigs -A -o jsonpath='{range .items[*]}{.spec.hostname}{"\n"}{end}'`).
+1. Open the new 3.5 dashboard (Gateway API URL — `oc get gatewayconfigs -A -o jsonpath='{range .items[*]}{.spec.hostname}{"\n"}{end}'`).
 2. Navigate to **Develop & train → Feature Store**.
 3. For each FeatureStore they configured in 2.25, confirm the UI still shows the expected features, entities, feature-views, data sources, and feature services.
 

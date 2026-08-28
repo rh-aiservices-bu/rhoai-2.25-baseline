@@ -6,15 +6,15 @@ Patch each stopped workbench to the 3.x auth layer, and handle users who couldn'
 
 ## Why
 
-> Workbench images left unmigrated continue to operate on the older 2.25.4 authentication layer. This hybrid environment can result in redirection loops and connectivity failures, primarily due to **NB_PREFIX** routing conflicts for RStudio, code-server, and custom images.
+> Workbench images left unmigrated continue to operate on the older 2.25.10 authentication layer. This hybrid environment can result in redirection loops and connectivity failures, primarily due to **NB_PREFIX** routing conflicts for RStudio, code-server, and custom images.
 >
 > — migration guide, Workbenches after upgrade, "Perform a deferred workbench image migration"
 
-The 2→3 auth change (oauth-proxy → kube-rbac-proxy) and Route → Gateway API routing require workbench pods to be started fresh with new env/sidecar config. The helper script patches the Notebook CRs in place; it can only do that safely when the Notebook is Stopped.
+The 2→3 auth change (oauth-proxy → kube-rbac-proxy) and Route → Gateway API routing require workbench pods to be started fresh with new env/sidecar config. The `workbenches.patch-auth-model` migration patches the Notebook CRs in place; it can only do that safely when the Notebook is Stopped.
 
 ## Prerequisite — notebook-controller pods
 
-Confirm both controllers are Ready before running the helper:
+Confirm both controllers are Ready before running the migration:
 
 ```
 oc get deployment -n redhat-ods-applications odh-notebook-controller-manager notebook-controller-deployment
@@ -23,16 +23,21 @@ oc get deployment -n redhat-ods-applications odh-notebook-controller-manager not
 
 ## Patch stopped workbenches
 
-Run the helper inside the rhai-cli container:
+Run the migration inside the rhai-cli pod. It prompts twice, so give it a TTY (`-it`):
 
 ```
-oc exec -n rhai-migration rhai-cli-0 -- bash -c '
-  cd /opt/rhai-upgrade-helpers/workbenches && \
-  ./workbench-2.x-to-3.x-upgrade.sh patch --only-stopped --with-cleanup -y
-'
+oc exec -it -n rhai-migration rhai-cli-0 -- \
+  rhai-cli migrate run --migration workbenches.patch-auth-model \
+  --target-version 3.5.0 --only-stopped --with-cleanup
 ```
 
-The `-y/--yes` flag is required for non-interactive use (`oc exec` does not give the helper a TTY for its confirmation banner — without it the script exits 1 immediately).
+The action **prompts for interactive confirmation twice** — once before patching, once before the OAuth cleanup. Enter `y` at each prompt (this is why the command needs `-it`; without a TTY the prompt can't be answered).
+
+You may also see a benign warning that can be **ignored**:
+
+```
+WARNING: migration workbenches.patch-auth-model has phase pre-upgrade but effective phase is post-upgrade
+```
 
 Expected final lines:
 
@@ -46,10 +51,8 @@ After this, users can start their workbenches again. Notify them.
 ## Verify
 
 ```
-oc exec -n rhai-migration rhai-cli-0 -- bash -c '
-  cd /opt/rhai-upgrade-helpers/workbenches && \
-  ./workbench-2.x-to-3.x-upgrade.sh list --all
-'
+oc exec -n rhai-migration rhai-cli-0 -- \
+  rhai-cli migrate run --migration workbenches.verify-migration --target-version 3.5.0
 # Expect: OK: All workbenches have been migrated.
 ```
 
@@ -82,7 +85,8 @@ Some users couldn't stop theirs during the maintenance window. Those Notebooks s
   oc start-build cuda-rstudio-server-rhel9 -n redhat-ods-applications --follow
   oc start-build rstudio-server-rhel9 -n redhat-ods-applications --follow
   ```
-- **Custom images ("BYON"):** must be rebuilt for the [Kubernetes Gateway API path-based routing](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/3.3/html/managing_resources/introducing-kubernetes-gateway-api_resource-mgmt) and kube-rbac-proxy. This is a per-owner task — no platform-level fix. See the pre-upgrade [workbenches.md § Reuse the same `-gw` image across multiple clusters](../workbenches.md) for the dev → preprod → prod image-promotion pattern, and § Known RStudio `-gw` build gotchas for the two NGINX bugs that were caught in production.
+- **Custom images ("BYON"):** must be rebuilt for the [Kubernetes Gateway API path-based routing](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/3.5/html/managing_resources/introducing-kubernetes-gateway-api_resource-mgmt) and kube-rbac-proxy. This is a per-owner task — no platform-level fix. See the pre-upgrade [workbenches.md § Reuse the same `-gw` image across multiple clusters](../workbenches.md) for the dev → preprod → prod image-promotion pattern, and § Known RStudio `-gw` build gotchas for the two NGINX bugs that were caught in production.
+  - **Exception — custom image built FROM the 2025.2 base:** a custom image whose Dockerfile is `FROM` the 2025.2 OOTB base **inherits** the Gateway API / NB_PREFIX support and kube-rbac-proxy layers. It needs only a **re-import** into the dashboard plus the `workbenches.patch-auth-model` patch above — no rebuild. Watch for the false-friend case: an image merely **tagged** `2025.2` but still built on an **older base** does *not* inherit any of this and still needs a full Gateway API rebuild.
 
 ## GPU notebooks pinned to a sha256 digest
 
@@ -221,6 +225,6 @@ Expect `True` and the GPU model name (e.g. `NVIDIA L4`).
 
 ## Callouts
 
-- **Do this resolver before the Ray resolver.** The Ray migration script assumes the workbench controllers are already reconciled against 3.x config. Running Ray first can leave RayClusters in an inconsistent owner-reference state.
-- If the helper reports `Failed: N` — do **not** force-start those Notebooks. Inspect each Notebook's events (`oc describe notebook <name> -n <ns>`) and open a support case rather than improvising.
+- **Do this resolver before the Ray resolver.** The Ray migration assumes the workbench controllers are already reconciled against 3.x config. Running Ray first can leave RayClusters in an inconsistent owner-reference state.
+- If the migration reports `Failed: N` — do **not** force-start those Notebooks. Inspect each Notebook's events (`oc describe notebook <name> -n <ns>`) and open a support case rather than improvising.
 - **Test one workbench before announcing.** A real-world `-gw` RStudio image had two NGINX bugs (`/api` 403 + redirect strips `NB_PREFIX`) that only surfaced when a user actually started the workbench post-upgrade. Pick one workbench per image variant, start it, hit the IDE in a browser, then notify users.

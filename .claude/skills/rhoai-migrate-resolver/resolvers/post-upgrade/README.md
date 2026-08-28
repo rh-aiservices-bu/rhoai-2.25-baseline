@@ -1,6 +1,6 @@
 # Post-upgrade resolvers
 
-After the RHOAI operator CSV reaches `rhods-operator.3.3.2` and the old 2.x CSV is gone, walk through these component tasks to finalize the cluster. The order matters only for a couple of steps (workbenches before Ray); otherwise run them as needed.
+After the RHOAI operator CSV reaches `rhods-operator.3.5.0` and the old 2.x CSV is gone, walk through these component tasks to finalize the cluster. The order matters only for a couple of steps (workbenches before Ray); otherwise run them as needed.
 
 ## Suggested order
 
@@ -8,12 +8,12 @@ After the RHOAI operator CSV reaches `rhods-operator.3.3.2` and the old 2.x CSV 
 2. **[model-serving.md](model-serving.md)** — restore `managed=true` on `inferenceservice-config`, verify KServe + ODH Model Controller, troubleshoot any leftover 2.x operators. Do this early — many other components depend on KServe.
 3. **[workbenches.md](workbenches.md)** — patch stopped workbenches first (`workbench-2.x-to-3.x-upgrade.sh`). Blocks the Ray resolver.
 4. **[ray.md](ray.md)** — run the Ray cluster migration script. Requires workbenches first.
-5. **[registry-catalog.md](registry-catalog.md)** — verify Model Registry + AI Hub Catalog pods, tell users the dashboard nav moved.
-6. **[feast.md](feast.md)** — Feature Store verification (skip if unused).
-7. **[llama-stack.md](llama-stack.md)** — recreate LSDs from pre-upgrade archive (data was lost).
-8. **[pipelines.md](pipelines.md)** — admin runs `post_upgrade_check.sh`, users validate pipelines.
+5. **[registry-catalog.md](registry-catalog.md)** — verify Model Registry + AI hub Models (Catalog) pods, tell users the dashboard nav moved; ModelRegistry now depends on the Data Science Gateway.
+6. **[feast.md](feast.md)** — Feature Store (GA in 3.5) verification (skip if unused).
+7. **[llama-stack.md](llama-stack.md)** — recreate as `OGXServer` CRs from the pre-upgrade archive (data was lost).
+8. **[pipelines.md](pipelines.md)** — admin runs `rhai-cli migrate run --migration ai-pipelines.post-upgrade-check`, users validate pipelines.
 9. **[trustyai.md](trustyai.md)** — check backups, fix Guardrails, restore data, handle GPU deadlock.
-10. **[kfto.md](kfto.md)** — verify PyTorchJobs survived.
+10. **[kfto.md](kfto.md)** — `training.verify-workloads` (read-only) reports Kubeflow v1 workloads' readiness to migrate to Trainer v2.
 
 ## Driving the skill
 

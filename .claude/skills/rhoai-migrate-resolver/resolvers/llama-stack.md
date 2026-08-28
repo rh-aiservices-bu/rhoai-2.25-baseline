@@ -1,14 +1,14 @@
-# Resolver — Llama Stack
+# Resolver — Llama Stack / OGX
 
 **rhai-cli signal:** `workload / llamastackdistribution / *`.
 
 ## Why
 
-> **Llama Stack:** Transitioning from SQLite to PostgreSQL. All existing data (agent state, telemetry, vector databases) will be lost. Manually archive before migration and recreate resources afterward.
+> **Llama Stack → OGX:** In 3.5, Llama Stack is renamed **OGX (Open GenAI Stack)** and the `LlamaStackDistribution` CR is replaced by **`OGXServer` (v1beta1)**. Existing data (agent state, telemetry, vector databases) is not portable across the rename and will be lost. Manually archive before migration and recreate resources afterward.
 >
 > — architectural-changes.md § *Data Considerations*
 
-This is the one component where the migration guide explicitly documents **data loss**. The 2.25 Llama Stack stores everything in SQLite inside the pod's ephemeral storage; 3.x uses PostgreSQL and the agent/vector APIs change shape. Upgrading without archiving = data gone.
+This is the one component where the migration guide explicitly documents **data loss**. The 2.25 Llama Stack stores everything in SQLite inside the pod's ephemeral storage; 3.5 rebrands the whole stack to OGX — the `LlamaStackDistribution` kind goes away, the CR becomes `OGXServer`, and the agent/vector APIs change shape. Upgrading without archiving = data gone.
 
 ## Enumerate every LlamaStackDistribution
 
@@ -18,45 +18,65 @@ oc get llamastackdistribution -A
 
 If there are none, skip — nothing to archive.
 
-## For each LSD, archive its data
+## Archive every LlamaStackDistribution's data
 
-The data lives inside the LSD's own pod. Which directories matter depends on how the user configured it (Milvus on PVC, SQLite on emptyDir, etc.). The migration guide §2.3.2 puts the responsibility on the LSD owner (not the cluster admin) to know what to archive.
+In 3.5 the archive step runs through a `rhai-cli migrate prepare` action — `llamastack.backup` (it replaces the old `backup-all-llamastack.sh` helper). The migration guide §2.5 still puts the responsibility on the LSD owner (not the cluster admin) to confirm what needs archiving, because in-pod SQLite/emptyDir data is not portable across the OGX rename.
 
-Give the LSD owner this checklist. They need to run these for their own LSD:
+Preview what would be archived first with `--dry-run`:
+
+```
+oc exec -n rhai-migration rhai-cli-0 -- \
+  /opt/rhai-cli/bin/rhai-cli migrate prepare --migration llamastack.backup \
+  --target-version 3.5.0 --output-dir /tmp/rhoai-upgrade-backup/llamastack --dry-run
+```
+
+Then run it for real (drop `--dry-run`):
+
+```
+oc exec -n rhai-migration rhai-cli-0 -- \
+  /opt/rhai-cli/bin/rhai-cli migrate prepare --migration llamastack.backup \
+  --target-version 3.5.0 --output-dir /tmp/rhoai-upgrade-backup/llamastack
+```
+
+Copy the archive off the pod to your workstation:
+
+```
+oc cp rhai-migration/rhai-cli-0:/tmp/rhoai-upgrade-backup/llamastack ./llamastack-backup
+```
+
+If you need to confirm where a given LSD keeps its data before trusting the archive (Milvus on PVC, SQLite on emptyDir, etc.), inspect the pod's mounts:
 
 ```
 NS=<llama-stack-namespace>
 LSD=<llamastackdistribution-name>
 
-# Find the pod
 POD=$(oc get pod -n "$NS" -l app.kubernetes.io/instance="$LSD" -o jsonpath='{.items[0].metadata.name}')
-
-# Inspect where data lives for this LSD
 oc describe pod "$POD" -n "$NS" | grep -A1 -E 'Mounts:|Volume'
 
-# Typical archive paths (adjust based on the pod's actual volume mounts):
+# Typical in-pod data paths:
 #   /opt/app-root/src/milvus.db               (Milvus vector DB)
 #   /opt/app-root/src/.llama/                 (agent state, SQLite)
 #   /opt/app-root/src/telemetry.db            (SQLite telemetry)
-
-# Tar them up locally
-oc cp "$NS/$POD:/opt/app-root/src" ./lsd-archive-"$NS"-"$LSD"-$(date +%Y%m%d%H%M)
 ```
 
 ## Callouts
 
-- **There is no tool that does this automatically.** Red Hat does not provide a migration script for Llama Stack data — it's a known TP-to-TP transition with breaking changes.
+- **`llamastack.backup` snapshots what it can, but it is not a portability guarantee.** The archive is a safety net for a known transition with breaking changes — data that lives only in the pod's SQLite/emptyDir may still not survive the OGX rename. Treat it as "capture everything you can before you delete", not "restore later".
 - If the LSD data is already stored in an **external** Milvus/Postgres/S3 outside the pod, it survives. Only in-pod SQLite / emptyDir storage is lost.
-- After the upgrade, LSD owners must recreate LlamaStackDistribution CRs from scratch — they cannot restore the old CR YAML because the spec schema changed (VectorDB API removed, Inference API became OpenAI-compatible, etc.).
+- After the upgrade, owners must recreate their workloads as **`OGXServer` (v1beta1)** CRs — the `LlamaStackDistribution` kind no longer exists in 3.5. They cannot restore the old CR YAML because the kind changed and the spec schema changed (VectorDB API removed, Inference API became OpenAI-compatible, etc.); client apps must port to the new OGX APIs.
 
-## Consider deferring
+## Delete the LlamaStackDistribution CRs before upgrade
 
-If the LSD's data isn't worth losing but isn't worth doing a custom archive for either, consider deleting the LSD before upgrade and recreating fresh post-upgrade. This is often the pragmatic choice for Tech Preview workloads:
+Once each LSD is archived (or you've decided its data isn't worth keeping), **delete the `LlamaStackDistribution` CRs before the upgrade** — they are recreated as `OGXServer` CRs afterward. The kind is removed in 3.5, so leaving them in place has nothing to reconcile against:
 
 ```
 oc delete llamastackdistribution <name> -n <namespace>
 ```
 
+For a workload whose data isn't worth archiving at all, deleting now and recreating fresh post-upgrade is the pragmatic choice — often the right call for Tech Preview workloads.
+
 ## After
 
-Re-run `rhai-cli lint --target-version 3.3.2 --checks "*llamastackdistribution*"`. The check should no longer flag unarchived LSDs (rhai-cli can't tell if you actually archived — it just confirms you've acknowledged the data-loss warning by either archiving or deleting each LSD).
+Re-run `rhai-cli lint --target-version 3.5 --checks "*llamastack*"`. The check should no longer flag unarchived LSDs (rhai-cli can't tell if you actually archived — it just confirms you've acknowledged the data-loss warning by either archiving or deleting each LSD).
+
+Post-upgrade, owners recreate their workloads as **`OGXServer` (v1beta1)** CRs and port client apps to the OGX APIs — the archive and the old `llsd-backup.yaml` serve only as a reference for the new spec. See the RHOAI 3.5 `working_with_ogx` documentation (formerly `working_with_llama_stack`) for the OGX APIs.
