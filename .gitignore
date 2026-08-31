@@ -1,5 +1,8 @@
 /knowledge/*
 rhai-cli-output.yaml
+/RHOAI migration — 3.3 vs 3.5 changes.md
+/RHOAI 2.25→3.5 migration run — cluster-5gkpg.md
+/RHOAI 2.25→3.5 guide — gap report.md
 ray-backup
 trustyai-backup
 rhoai-2254-install/gitops/.env

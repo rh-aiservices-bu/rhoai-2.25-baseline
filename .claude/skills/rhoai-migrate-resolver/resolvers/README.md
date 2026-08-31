@@ -3,11 +3,13 @@
 > For the **post-upgrade** chapter 4 resolvers, see [post-upgrade/README.md](post-upgrade/README.md).
 
 
-The `rhai-cli lint --target-version 3.3.2` report has one row per check with columns:
+The `rhai-cli lint --target-version 3.5` report has one row per check with columns:
 
 ```
-STATUS | GROUP | KIND | CHECK | IMPACT | MESSAGE
+STATUS | KIND | GROUP | CHECK | IMPACT | MESSAGE
 ```
+
+> Column order changed in 3.5: **`KIND` now precedes `GROUP`** (the 3.3 output listed `GROUP | KIND`). The routing table below still matches on (KIND, CHECK), so the reorder is cosmetic for routing — but read the columns in the new order when eyeballing raw output.
 
 Status icons: `✗` critical, `⚠` warning, `✓` info. Work `prohibited` → `critical` first, then `warning`. `info` rows confirm a prereq was met — skip.
 
@@ -38,7 +40,7 @@ spec:
     spec:
       containers:
         - name: rhai-cli
-          image: registry.redhat.io/rhoai/rhai-cli-rhel9:v3.3.2
+          image: registry.redhat.io/rhoai/rhai-cli-rhel9:v3.5.0
           command: ["sh","-c","sleep infinity"]
           volumeMounts:
             - { name: backup, mountPath: /tmp/rhoai-upgrade-backup }
@@ -56,12 +58,23 @@ oc create clusterrolebinding rhai-cli-admin \
   --clusterrole=cluster-admin \
   --serviceaccount=rhai-migration:default
 
+# Confirm the binary version (should report: kubectl-odh version 1.26.4)
+oc exec -n rhai-migration rhai-cli-0 -- /opt/rhai-cli/bin/rhai-cli version
+
 # Run the lint
-oc exec -n rhai-migration rhai-cli-0 -- /opt/rhai-cli/bin/rhai-cli lint --target-version 3.3.2
+oc exec -n rhai-migration rhai-cli-0 -- /opt/rhai-cli/bin/rhai-cli lint --target-version 3.5
 
 # Or capture as YAML to attach to a support case
-oc exec -n rhai-migration rhai-cli-0 -- /opt/rhai-cli/bin/rhai-cli lint --target-version 3.3.2 --output yaml > rhai-cli-output.yaml
+oc exec -n rhai-migration rhai-cli-0 -- /opt/rhai-cli/bin/rhai-cli lint --target-version 3.5 --output yaml > rhai-cli-output.yaml
 ```
+
+The CLI image is `registry.redhat.io/rhoai/rhai-cli-rhel9:v3.5.0` (pulls with the cluster's global pull secret; the binary is `kubectl-odh` version 1.26.4). `lint` exit codes:
+
+- `0` — all checks passed.
+- `1` — one or more `prohibited`/`critical` findings (expected on a real pre-upgrade cluster, **not** a tool error).
+- `2` — warning-only findings (expected, not a tool error).
+
+**Per-component work is now driven by `rhai-cli migrate` actions, not helper scripts.** The `/opt/rhai-upgrade-helpers/*.sh` directory no longer ships in 3.5. Backups, pre/post-upgrade checks, and conversions run as `rhai-cli migrate run|prepare|list --migration <name> --target-version 3.5.0` (with optional `--dry-run` / `--output-dir`). See [../reference/oc-patterns.md](../reference/oc-patterns.md) § *`rhai-cli migrate` actions* for the form, and each resolver for its specific `--migration <name>`. `lint` is pre-upgrade only — on a cluster already at 3.5 it no-ops (*"Current and target versions are the same (3.5), no checks will be executed."*); post-upgrade work uses the `migrate run` actions, which auto-detect the post-upgrade phase.
 
 ### Cleanup after migration
 
@@ -90,10 +103,10 @@ Match on (KIND, CHECK). If more than one row matches a resolver, walk through th
 | component | ray | *, codeflare-removal | [ray.md](ray.md) |
 | component | trustyai | * | [trustyai.md](trustyai.md) |
 | workload | guardrails | * | [trustyai.md](trustyai.md) § *Guardrails* |
-| workload | llamastackdistribution | * | [llama-stack.md](llama-stack.md) |
+| workload | llamastack | * | [llama-stack.md](llama-stack.md) |
 | workload | llminferenceservice | template-pinning, auth | [llm-isvc.md](llm-isvc.md) |
 
-Anything not in the table: read the raw rhai-cli message and search the official RHOAI 2.25.4 → 3.3.2 migration guide for the matching §2.x section before answering. The migration guide is not committed to this repo — fall back to each resolver's inline quotes for authoritative wording.
+Anything not in the table: read the raw rhai-cli message and search the official RHOAI 2.25.10 (and later) → 3.5 migration guide for the matching §2.x section before answering. The migration guide is not committed to this repo — fall back to each resolver's inline quotes for authoritative wording.
 
 ## Priority order
 
@@ -114,9 +127,9 @@ Re-run `rhai-cli lint` between major phases — some checks only activate once p
 
 The resolvers stop at "pre-upgrade clean." The upgrade itself is two steps in the migration guide, but with a wrinkle worth knowing in advance:
 
-1. **Channel switch.** `oc -n redhat-ods-operator patch subscription rhods-operator --type=merge -p '{"spec":{"channel":"support-required-upgrade"}}'` — the channel name is intentionally verbose to prevent accidental triggers and is the same on every 2.25.x → 3.3.x migration. Confirm the current channel first (`oc -n redhat-ods-operator get subscription rhods-operator -o jsonpath='{.spec.channel}'`); typical pre-state is `stable-2.25`.
+1. **Channel switch.** `oc -n redhat-ods-operator patch subscription rhods-operator --type=merge -p '{"spec":{"channel":"support-required-upgrade-3.5"}}'` — the channel name is intentionally verbose to prevent accidental triggers and is versioned in 3.5 (the unversioned `support-required-upgrade` is the 2.25→3.3 path only; only `support-required-upgrade-3.5` provides the cross-major 2.25→3.5 path). Confirm the current channel first (`oc -n redhat-ods-operator get subscription rhods-operator -o jsonpath='{.spec.channel}'`); typical pre-state is `stable-2.25`.
 
-2. **OLM walks the upgrade graph one CSV at a time — not in a single jump.** Even though `support-required-upgrade`'s `currentCSV` is `rhods-operator.3.3.2`, OLM walks the `replaces` chain. From a cluster on `2.25.4` you'll see two unapproved InstallPlans in sequence: first `2.25.4 → 2.25.6`, then `2.25.6 → 3.3.2`. Both require manual approval because the migration channel uses `installPlanApproval: Manual`. Approve the first, wait for `Succeeded`, then the second appears.
+2. **OLM walks the upgrade graph one CSV at a time — not in a single jump.** Even though `support-required-upgrade-3.5`'s `currentCSV` is `rhods-operator.3.5.0`, OLM walks the `replaces` chain. From a cluster on `2.25.10` you'll see the intermediate z-stream InstallPlans in sequence before the final `→ 3.5.0` step. Each requires manual approval because the migration channel uses `installPlanApproval: Manual`. Approve the first, wait for `Succeeded`, then the next appears.
 
    ```
    # Approve whichever InstallPlan is currently unapproved
@@ -126,15 +139,15 @@ The resolvers stop at "pre-upgrade clean." The upgrade itself is two steps in th
 
 3. **HardwareProfiles auto-migrate** from `dashboard.opendatahub.io/v1alpha1` to `infrastructure.opendatahub.io` with **renamed objects** (e.g., `large-notebooks-17kpw` → `containersize-large-notebooks`) — any user automation referencing the old names breaks here. The lint's `hardwareprofile-migration` advisory is the warning sign before the upgrade.
 
-   > **DSC schema rename — verified NOT shipped in 3.3.3.** Architectural notes (and the rhai-cli `datasciencepipelines / renaming` warning) describe a future rename of `.spec.components.datasciencepipelines` → `.spec.components.aipipelines` plus new `trainer` and `mlflowoperator` DSC fields. On a real 3.3.3 cluster `oc explain dsc.spec.components.aipipelines` returns `field "aipipelines" does not exist` and `datasciencepipelines` is still the live component path. The lint's warning is *forward-looking* — it tells you the rename is coming, not that it has happened. Earlier revisions of this README claimed the rename was active in 3.3.2; that was wrong. Do not direct automation owners to flip their DSC field names until the rename actually ships.
+   > **DSC schema rename — now shipped and automatic in 3.5.** The rename that 3.3.x only warned about is live in 3.5: on the first post-upgrade operator startup the DSC is converted v1→v2 via the conversion webhook — `.spec.components.datasciencepipelines` → `.spec.components.aipipelines`, and `modelmeshserving` and `codeflare` are removed. This is handled automatically by the operator; you do **not** patch these field names by hand. Pre-upgrade you still write the *v1* field names (`datasciencepipelines`, `modelmeshserving`, `serviceMesh`) — that's intentional; the operator converts them after the upgrade. Automation that references the old component paths should be updated to `aipipelines` only after the cluster is on 3.5.
 
-4. **Switch off the migration channel once you're on 3.3.2.** `support-required-upgrade` is a one-shot trigger channel — it does not advance to later 3.3.x patch releases. Leaving the subscription there means no ongoing z-stream updates. After the upgrade completes, move to the stable 3.3 channel so the cluster receives 3.3.x patches:
+4. **Switch off the migration channel once you're on 3.5.0.** `support-required-upgrade-3.5` is a one-shot trigger channel — it does not advance to later 3.5.x patch releases. Leaving the subscription there means no ongoing z-stream updates. After the upgrade completes, move to a going-forward 3.x channel so the cluster receives patches:
 
    ```
    oc patch subscription rhods-operator -n redhat-ods-operator --type=merge \
-     -p '{"spec":{"channel":"stable-3.3"}}'
+     -p '{"spec":{"channel":"stable-3.5"}}'
    ```
 
-   Pick `stable-3.3` (stays on the 3.3 z-stream) rather than `stable-3.x` (would eventually offer a 3.4 minor upgrade). See [post-upgrade/operator.md](post-upgrade/operator.md) § *Switch the subscription channel off the migration channel* for the full step + verification.
+   Pick `stable-3.5` (stays on the 3.5 z-stream) rather than `stable-3.x` (would eventually offer a later minor upgrade); `eus-3.5` is also available. See [post-upgrade/operator.md](post-upgrade/operator.md) § *Switch the subscription channel off the migration channel* for the full step + verification.
 
 After step 3 reports `phase=Succeeded` + DSC `Ready`, run [post-upgrade/workbenches.md](post-upgrade/workbenches.md) to patch workbenches off the 2.x oauth-proxy auth model, and do the channel switch in step 4. The rest of the post-upgrade resolvers are component-specific (see [post-upgrade/README.md](post-upgrade/README.md)).

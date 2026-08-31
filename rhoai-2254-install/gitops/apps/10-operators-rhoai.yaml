@@ -1,6 +1,6 @@
 ---
-# Wave 5: RHOAI 2.25.6 operator Subscription. Pinned via installPlanApproval=Manual
-# + startingCSV=rhods-operator.2.25.6. The InstallPlan-approval Job lives in a
+# Wave 5: RHOAI 2.25.10 operator Subscription. Pinned via installPlanApproval=Manual
+# + startingCSV=rhods-operator.2.25.10. The InstallPlan-approval Job lives in a
 # separate Application (10-installplan-approver.yaml, wave 6) so its sync isn't
 # gated by this Application's health — the Subscription only reports Healthy after
 # the CSV is Succeeded, and the CSV can't be Succeeded until the InstallPlan is
@@ -18,7 +18,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/rhpds/rhoai-migration-automation.git
-    targetRevision: main
+    targetRevision: "release-3.5"
     path: rhoai-2254-install/10-operators
     directory:
       include: "rhoai-operator.yaml"

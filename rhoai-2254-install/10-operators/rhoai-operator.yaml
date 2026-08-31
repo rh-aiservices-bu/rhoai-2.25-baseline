@@ -6,7 +6,7 @@ metadata:
   namespace: redhat-ods-operator
 spec: {}
 ---
-# Channel pinned to stable-2.25. Manual approval so the CSV stays at 2.25.6
+# Channel pinned to stable-2.25. Manual approval so the CSV stays at 2.25.10
 # and does not auto-upgrade to 2.26+ — required so we stay at the pre-migration version.
 apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
@@ -19,4 +19,4 @@ spec:
   source: redhat-operators
   sourceNamespace: openshift-marketplace
   installPlanApproval: Manual
-  startingCSV: rhods-operator.2.25.6
+  startingCSV: rhods-operator.2.25.10

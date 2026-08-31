@@ -1,5 +1,5 @@
 ---
-# The RHOAI 2.25.6 Subscription uses installPlanApproval=Manual + startingCSV=2.25.6
+# The RHOAI 2.25.10 Subscription uses installPlanApproval=Manual + startingCSV=2.25.10
 # to pin the channel at the pre-migration version. The bash install approves the
 # initial InstallPlan with approve_installplan(); Argo CD needs to do the same.
 #

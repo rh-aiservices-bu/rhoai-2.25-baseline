@@ -8,7 +8,7 @@
 >
 > — architectural-changes.md § *Platform Prerequisites*
 
-In RHOAI 3.x, cert-manager issues the TLS certs that the JobSet + LeaderWorkerSet controllers, the Red Hat build of Kueue, and KubeRay use internally. RHOAI 2.25.4 didn't require it, so installing it is a migration-prep step (§2.1 of the migration guide).
+In RHOAI 3.x, cert-manager issues the TLS certs that the JobSet + LeaderWorkerSet controllers, the Red Hat build of Kueue, and KubeRay use internally. RHOAI 2.25.x didn't require it, so installing it is a migration-prep step (§2.1 of the migration guide). cert-manager remains a **hard 3.5 prerequisite** — the upgrade will not complete without it.
 
 ## Verify current state
 
@@ -21,7 +21,18 @@ If no CSV matches, cert-manager isn't installed yet.
 
 ## Commands to run
 
-Install the **cert-manager Operator for Red Hat OpenShift** from OperatorHub (packagemanifest `openshift-cert-manager-operator` on `redhat-operators`, channel `stable-v1`):
+Install the **cert-manager Operator for Red Hat OpenShift** (packagemanifest `openshift-cert-manager-operator` on `redhat-operators`, channel `stable-v1`). The guide documents two equivalent methods (§2.1) — pick one.
+
+### Method 1 — OpenShift web console
+
+1. In the OpenShift web console, go to **Operators → OperatorHub**.
+2. Search for **cert-manager Operator for Red Hat OpenShift** (the Red Hat build — not the community cert-manager).
+3. Click **Install**, then on the install form select **Update channel `stable-v1`** and **Installed Namespace `cert-manager-operator`** (the operator installs into `cert-manager-operator` and creates its operands in `cert-manager`), and click **Install**.
+4. Wait for the operator to report **Succeeded**, then jump to [Verify](#verify).
+
+### Method 2 — OpenShift CLI
+
+Create the `cert-manager-operator` namespace, an OperatorGroup, and a Subscription:
 
 ```
 oc create ns cert-manager-operator 2>/dev/null || true
@@ -55,7 +66,7 @@ EOF
 Wait until the CSV succeeds and the three cert-manager pods are running:
 
 ```
-oc get csv -n cert-manager-operator -w
+oc get csv -n cert-manager-operator --watch
 oc get pods -n cert-manager
 # expect: cert-manager-*, cert-manager-cainjector-*, cert-manager-webhook-* all Running
 ```

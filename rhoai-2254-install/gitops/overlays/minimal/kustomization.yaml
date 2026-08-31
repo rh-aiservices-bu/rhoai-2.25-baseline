@@ -1,6 +1,6 @@
 ---
 # Overlay "minimal" — operators + DSC only, no sample workloads. Useful when you
-# want a clean RHOAI 2.25.6 install and will deploy samples some other way.
+# want a clean RHOAI 2.25.10 install and will deploy samples some other way.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:

@@ -14,7 +14,7 @@
 
 The migration changes routing (Route → Gateway API) and auth (oauth-proxy → kube-rbac-proxy). Images built for 2.x embed the oauth-proxy sidecar config; under 3.x they hit redirect loops.
 
-## Three distinct sub-issues
+## Four distinct sub-issues
 
 ### 1. code-server workbenches must be on 2025.2 before upgrade
 
@@ -50,9 +50,17 @@ oc patch notebook "$NAME" -n "$NS" --type=json \
   -p='[{"op":"replace","path":"/spec/template/spec/containers/0/image","value":"image-registry.openshift-image-registry.svc:5000/redhat-ods-applications/rstudio-rhel9:latest"}]'
 ```
 
-Post-upgrade the image must be rebuilt (see architectural-changes.md § *Networking and Authentication Changes*); that step happens after the 3.3.2 upgrade itself.
+Post-upgrade the image must be rebuilt (see architectural-changes.md § *Networking and Authentication Changes*); that step happens after the 3.5 upgrade itself.
 
-### 3. Custom ("BYON") workbench images must be rebuilt for Gateway API + kube-rbac-proxy
+### 3. Custom ("BYON") workbench images — verify against the 2025.2 base, rebuild only if needed
+
+> **Lint bucket: "custom (user verification needed)."** The CLI sorts workbench images into compatible / incompatible / **custom**. Custom images land in their own bucket because the CLI **cannot** judge them — it can't see how the image was built. **A report of 0 incompatible does not mean the custom images are compatible** — it means the CLI declined to rule on them. You must verify each unique custom image yourself.
+
+**Decide per unique custom image, based on the 2025.2 base:**
+
+- **Built `FROM` the Red Hat 2025.2 workbench base** (e.g. `FROM registry.redhat.io/rhoai/odh-workbench-*:2025.2`) → it inherits Gateway API path-based routing and `NB_PREFIX` handling from the base. **No from-scratch rebuild needed** — just re-import the ImageStream tag on 3.x and apply the post-upgrade auth-model patch (`workbenches.patch-auth-model`, a POST-upgrade action — see the note below).
+- **Merely *tagged* `2025.2` on an older base** (the tag was bumped but the Dockerfile still `FROM`s a 2024.x / oauth-proxy image) → the tag is cosmetic; the image **still needs the full Gateway API rebuild** described below.
+- **Verify empirically — the tag alone is not proof.** Test **one workbench per unique image** (on a preprod cluster, or right after the upgrade): if it opens cleanly and `NB_PREFIX` resolves, the image is gateway-ready and needs only the auth-model patch; if it hits a redirect loop or "page not found", it needs the rebuild.
 
 For every custom ImageStream in `redhat-ods-applications` with labels `app.kubernetes.io/created-by: byon` and `opendatahub.io/notebook-image: "true"`:
 
@@ -76,6 +84,8 @@ oc get imagestream -n redhat-ods-applications -l app.kubernetes.io/created-by=by
 ```
 
 > Don't double-count Pipeline runtime images. ImageStreams matching `^runtime-` (e.g. `runtime-pytorch`, `runtime-rocm-tensorflow`) are AI-Pipeline runtime base images, not workbenches. The operator auto-updates them on upgrade — exclude from the BYON list above.
+
+> **Post-upgrade migrate actions (for context).** In 3.5 the helper scripts are gone; workbenches are finalized post-upgrade with `rhai-cli migrate run` actions, not `workbench-2.x-to-3.x-upgrade.sh`. The key one is `workbenches.patch-auth-model` (rewrites each workbench's auth model from oauth-proxy to kube-rbac-proxy); alongside it are actions to **clean up legacy OAuth resources** and to **attach the `kueue.x-k8s.io/queue-name` label**, plus `workbenches.verify-migration`. All of these are POST-upgrade — see [post-upgrade/workbenches.md](post-upgrade/workbenches.md). A custom image that is already gateway-ready (built from the 2025.2 base) needs only `patch-auth-model`, no rebuild.
 
 #### Reuse the same `-gw` image across multiple clusters (dev → preprod → prod)
 
@@ -156,7 +166,9 @@ The OOTB workbench images switched their source registry between tag generations
 | `2025.1`+ | `registry.redhat.io/rhoai/odh-workbench-*` (GA) |
 | `2025.2`+ | Same `registry.redhat.io/...` plus Python 3.12 / UBI 9 base |
 
-Both remain functional after the 3.3.2 upgrade. The migration just bumps the operator-managed ImageStreams; existing Notebook CRs keep their existing image refs unless the owner explicitly bumps the tag.
+Both remain functional after the 3.5 upgrade. The migration just bumps the operator-managed ImageStreams; existing Notebook CRs keep their existing image refs unless the owner explicitly bumps the tag.
+
+Red Hat **recommends** (but does not require) bumping Jupyter / data-science workbenches to `2025.2` for the 3.5-supported base. Unlike code-server — which **requires** `2025.2` before upgrade (sub-issue 1) — these keep working on their current tag across the upgrade, so bump them on your own schedule, subject to the GPU caveat below.
 
 > **Before you bump GPU workbenches to `2025.2`:** the `2025.2` tag of the CUDA images (`pytorch`, `tensorflow`, `minimal-gpu`) has a known regression on some NVIDIA driver versions — a stray `/usr/local/cuda/compat` entry in the loader path shadows the host `libcuda.so.1` and CUDA init fails with `Error 803: system has unsupported display driver / cuda driver combination` (JIRA AIPCC-7894, support case 04488542). It only surfaces once the workbench is started post-upgrade. Plan to either keep GPU workbenches on `2025.1` or apply the `LD_LIBRARY_PATH=/lib64` workaround — see [post-upgrade/workbenches.md § GPU workbench Error 803 on the 2025.2 image tag](post-upgrade/workbenches.md). CPU/Jupyter images are unaffected.
 
@@ -211,4 +223,4 @@ oc get notebooks -A -o json \
 
 ## After
 
-Re-run `rhai-cli lint --target-version 3.3.2 --checks "*notebook*"`.
+Re-run `rhai-cli lint --target-version 3.5 --checks "*notebook*"`.

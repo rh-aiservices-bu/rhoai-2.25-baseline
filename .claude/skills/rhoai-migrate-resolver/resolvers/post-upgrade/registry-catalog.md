@@ -4,7 +4,7 @@
 
 ## Why
 
-In 2.x the dashboard nav was **Models → Model registry** and **Models → Model catalog**. In 3.x it moved to **AI hub → Registry** and **AI hub → Catalog**. The underlying pods are the same, but the catalog side now runs **two** pods (`model-catalog` + `model-catalog-postgres`) instead of one — if the second is missing, the catalog UI won't load.
+In 2.x the dashboard nav was **Models → Model registry** and **Models → Model catalog**. In 3.5 it moved to **AI hub → Model registry** and **AI hub → Models** (the old **AI hub → Catalog** item), and registry configuration lives under **Settings → … → Model registry settings** (formerly *AI registry settings*). The underlying pods are the same, but the catalog side now runs **two** pods (`model-catalog` + `model-catalog-postgres`) instead of one — if the second is missing, the catalog UI won't load.
 
 Architecturally the change is cosmetic — architectural-changes.md does not call out AI Hub as a structural shift.
 
@@ -32,13 +32,24 @@ oc logs <my-model-catalog-pod> -n rhoai-model-registries -c catalog
 
 ## Verify via dashboard
 
-1. **Settings → Model resources and operations → AI registry settings** — each registry must show **Available**.
+1. **Settings → Model resources and operations → Model registry settings** — each registry must show **Available**. (Renamed from *AI registry settings* at 3.5 — migration guide §4.2.)
 2. **AI hub → Model registry** — registries display correctly; models previously registered are listed.
-3. **AI hub → Catalog** — default catalog + any custom catalogs display correctly.
+3. **AI hub → Models** — default catalog + any custom catalogs display correctly. (The old **AI hub → Catalog** nav item is **AI hub → Models** at 3.5 — migration guide §4.2.)
+
+## ModelRegistry depends on the Data Science Gateway (3.5)
+
+In 3.5 ModelRegistry is provisioned through the new **Data Science Gateway** — it needs the gateway to be Ready with a resolved domain before a registry can compute its endpoint. If a registry never becomes **Available** (or the DSC reports `ProvisioningFailed: modelregistry`), the root cause is usually a gateway that has no domain:
+
+```
+oc get gatewayconfig default-gateway -o jsonpath='phase={.status.phase}  domain={.status.domain}{"\n"}'
+oc get gateway data-science-gateway -n openshift-ingress -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}{"\n"}'
+```
+
+If the gateway is not Ready / has no domain (commonly because **leftover Service Mesh 2 Istio CRDs** block the OCP Gateway API control plane from installing its `networking.istio.io/v1` CRDs), fix the gateway first — see the Data Science Gateway gotcha in [operator.md](operator.md). ModelRegistry recovers on its own once the gateway reaches Ready.
 
 ## Tell users about the nav change
 
-Users will otherwise search "Model registry" and not find it. Surface the new path (AI hub → Registry/Catalog) in whatever internal docs/chat you use.
+Users will otherwise search "Model registry" and not find it. Surface the new path (**AI hub → Model registry** / **AI hub → Models**, **Settings → … → Model registry settings**) in whatever internal docs/chat you use.
 
 ## Callouts
 

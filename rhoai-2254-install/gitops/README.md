@@ -2,7 +2,7 @@
 
 This directory is an Argo CD deployment of the same pre-migration cluster the bash
 `install.sh` builds. It runs **alongside** the script path — pick whichever fits
-your workflow. Both end at the same state: RHOAI 2.25.6 + Service Mesh v2 +
+your workflow. Both end at the same state: RHOAI 2.25.10 + Service Mesh v2 +
 Serverless + standalone Authorino + a fully `Managed` DataScienceCluster, plus
 the optional sample workloads.
 
@@ -28,7 +28,7 @@ The Applications under `apps/` point back at the **existing** phase directories
 ignores the `run.sh` files and only applies the YAMLs. The two cases where the
 bash path does something beyond `oc apply` are handled by post-sync hook Jobs:
 
-- **RHOAI InstallPlan approval** ([hooks/approve-installplan.yaml](hooks/approve-installplan.yaml)) — the RHOAI Subscription uses `installPlanApproval=Manual` to pin `rhods-operator.2.25.6`. Argo CD won't approve InstallPlans, so a PostSync Job approves any pending InstallPlan in `redhat-ods-operator`. Idempotent and safe to re-run.
+- **RHOAI InstallPlan approval** ([hooks/approve-installplan.yaml](hooks/approve-installplan.yaml)) — the RHOAI Subscription uses `installPlanApproval=Manual` to pin `rhods-operator.2.25.10`. Argo CD won't approve InstallPlans, so a PostSync Job approves any pending InstallPlan in `redhat-ods-operator`. Idempotent and safe to re-run.
 - **ModelMesh controller rollout** ([hooks/rollout-modelmesh-controller.yaml](hooks/rollout-modelmesh-controller.yaml)) — the ModelMesh sample applies a `model-serving-config` ConfigMap that the controller only reads at startup. A PostSync Job restarts the deployment so `allowAnyPVC=true` + `podsPerRuntime=1` take effect.
 
 ## Sync waves
@@ -122,7 +122,7 @@ CSV becoming Ready and the DSC reconciling all of its component operators.
 
 `OVERLAY=all` (the default) gives you everything the bash `install.sh` deploys
 with its default flags. `OVERLAY=minimal` skips the sample workloads — useful
-when you want a clean RHOAI 2.25.6 install and will hand-deploy your own samples.
+when you want a clean RHOAI 2.25.10 install and will hand-deploy your own samples.
 
 To make a custom overlay, copy `overlays/all/` to `overlays/<name>/`, remove the
 lines you don't want, and set `OVERLAY=<name>` before running `bootstrap.sh`.

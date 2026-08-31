@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Creates the DSCInitialization + DataScienceCluster for the 2.25.6 pre-migration stack.
+# Creates the DSCInitialization + DataScienceCluster for the 2.25.10 pre-migration stack.
 # The RHOAI operator will:
 #   - create the Service Mesh control plane (SMCP) in istio-system (if serviceMesh=Managed)
 #   - install KNative Serving in knative-serving (if kserve.serving=Managed)

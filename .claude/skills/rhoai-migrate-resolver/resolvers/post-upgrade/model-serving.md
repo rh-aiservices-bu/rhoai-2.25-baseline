@@ -6,7 +6,7 @@ Restore the `inferenceservice-config` ConfigMap management annotation, verify th
 
 ## Why
 
-During the pre-upgrade ConfigMap step (guide §2.8.8), `inferenceservice-config` is annotated with `opendatahub.io/managed=false` so manual edits survive the upgrade. Post-upgrade, it needs to be flipped back to `managed=true` so the 3.x operator owns it again. Leaving it unmanaged silently breaks future config changes.
+During the pre-upgrade ConfigMap step (guide §2.10.8), `inferenceservice-config` is annotated with `opendatahub.io/managed=false` so manual edits survive the upgrade. Post-upgrade, it needs to be flipped back to `managed=true` so the 3.x operator owns it again. Leaving it unmanaged silently breaks future config changes.
 
 Unconverted ISVCs return **HTTP 503** after the upgrade (architectural-changes.md § *Model Serving Migration*: "Models left unconverted will return HTTP 503 errors"). You can still convert them post-upgrade — the pre-upgrade path is just less disruptive.
 
@@ -15,10 +15,11 @@ Unconverted ISVCs return **HTTP 503** after the upgrade (architectural-changes.m
 If you customized `inferenceservice-config` yourself, skip this — otherwise restore management:
 
 ```
-# Use the helper in the rhai-cli container
+# 3.5: the after-upgrade helper scripts are gone — use the rhai-cli migrate action
+# (auto-detects the post-upgrade phase; runs cluster-wide)
 oc exec -n rhai-migration rhai-cli-0 -- \
-  /opt/rhai-upgrade-helpers/model-serving/after-upgrade/managed-inferenceservice-config.sh \
-  -n redhat-ods-applications
+  /opt/rhai-cli/bin/rhai-cli migrate run \
+  --migration modelserving.managed-isvc-config --target-version 3.5.0
 ```
 
 Or by hand:
@@ -53,7 +54,9 @@ oc get pods -n redhat-ods-applications -l control-plane=kserve-controller-manage
 # ODH Model Controller
 oc get pods -n redhat-ods-applications -l control-plane=odh-model-controller
 
-# All ISVCs — every row should show RawDeployment + True
+# All ISVCs — every row should show Standard + True
+# NOTE: 3.5 renamed the RawDeployment deployment mode to Standard. Services that showed
+# DEPLOYMENT_MODE=RawDeployment before the upgrade now report Standard — same mode, new label.
 oc get isvc -A -o json | jq -r '["NAMESPACE","NAME","DEPLOYMENT_MODE","READY"], (.items[] | [.metadata.namespace, .metadata.name, .status.deploymentMode, (.status.conditions[] | select(.type=="Ready") | .status)]) | @tsv' | column -t
 
 # LLMInferenceServices (if any)
@@ -74,6 +77,38 @@ oc get llminferenceservices --all-namespaces
 **Symptom:** ISVC appears healthy but requests fail with **HTTP 503** and an "Application Not Available" page.
 
 **Resolution:** Same KB article above. Must be recreated against a single-model ServingRuntime (`spec.multiModel: false`).
+
+### Converted ModelMesh model (PVC-backed OVMS) won't become Ready
+
+**Symptom:** the ISVC *was* converted (shows `Standard`/RawDeployment, `multiModel=false`, container renamed `kserve-container`), but the predictor never reaches Ready — it crash-loops or stays `0/1`. This is a **different** failure mode from the 503 "not converted" cases above: the metadata migrated, the model didn't start.
+
+**Cause (gap report "Gap 1"):** `modelserving.modelmesh-to-raw` migrates the ISVC/runtime metadata but does **not** rewrite three things for a PVC-backed OVMS model, despite the guide implying storage is handled automatically:
+
+1. **Storage** — ModelMesh `storage: {key, path}` (`pvc` type) is left in place; the KServe pod-mutator webhook rejects it: `storage type [pvc] is not supported, must be one of [s3, hdfs, webhdfs]`.
+2. **OVMS launch args** — the runtime keeps multi-model args (`--config_path=/models/model_config_list.json`) → `Configuration file is invalid` crash-loop. KServe Standard serves one model from `/mnt/models`.
+3. **Readiness probe / port** — the converted runtime declares no container port, so KServe defaults the probe to `tcpSocket:8080`, but OVMS serves REST on **8888** → pod runs but never passes readiness (`0/1`).
+
+**Fix (example — ISVC `my-modelmesh-isvc` in `ml-project-c`, runtime `ovms-mm`, PVC `model-store`, model path `mobilenet`; resolve the PVC name from the `storage-config` secret's key). Adjust names for your model:**
+
+```
+# 1. PVC storage → storageUri
+oc patch isvc my-modelmesh-isvc -n ml-project-c --type=merge \
+  -p '{"spec":{"predictor":{"model":{"storageUri":"pvc://model-store/mobilenet","storage":null}}}}'
+
+# 2. OVMS multi-model args → single-model
+oc patch servingruntime ovms-mm -n ml-project-c --type=json -p '[{"op":"replace","path":"/spec/containers/0/args","value":[
+  "--model_name=my-modelmesh-isvc","--model_path=/mnt/models","--port=8001","--rest_port=8888",
+  "--file_system_poll_wait_seconds=0","--grpc_bind_address=0.0.0.0","--rest_bind_address=0.0.0.0"]}]'
+
+# 3. Declare container port + readiness probe on the OVMS REST port
+oc patch servingruntime ovms-mm -n ml-project-c --type=json -p '[
+  {"op":"add","path":"/spec/containers/0/ports","value":[{"containerPort":8888,"protocol":"TCP"}]},
+  {"op":"add","path":"/spec/containers/0/readinessProbe","value":{"tcpSocket":{"port":8888},"periodSeconds":10,"failureThreshold":3,"timeoutSeconds":5}}]'
+
+oc rollout restart deployment my-modelmesh-isvc-predictor -n ml-project-c
+```
+
+This is best handled **pre-upgrade** while ModelMesh is still active (see the pre-upgrade [../kserve.md](../kserve.md) ModelMesh conversion coverage), but the same three patches work post-upgrade on a model that came across down. See KB [7134025](https://access.redhat.com/articles/7134025).
 
 ### Legacy Serverless ISVC stuck in Terminating (finalizer deadlock)
 

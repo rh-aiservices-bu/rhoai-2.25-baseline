@@ -20,9 +20,9 @@ Three layers, all of which the user owns end-to-end (this resolver guides; it do
 | --- | --- | --- |
 | **1. etcd snapshot** | Full cluster control plane: OCP itself, RHOAI operator state, every dependent operator (Serverless, Service Mesh, cert-manager, RHCL, etc.), every CR, Secret, and CRD instance | OCP-shipped `cluster-backup.sh` on a control-plane node |
 | **2. OADP (Velero)** | User-namespace workloads + PVC contents (workbench storage, pipeline artefacts, model artefacts, etc.) | OADP Operator from `redhat-operators` (channel `stable`) |
-| **3. rhai-cli helper artefacts** | Per-component pre/post-migration backups (TrustyAI metrics, Llama Stack data, Ray cluster YAMLs, inferenceservice-config) | `/tmp/rhoai-upgrade-backup` PVC inside the rhai-cli pod, generated during migration |
+| **3. rhai-cli migrate artefacts** | Per-component pre/post-migration backups (TrustyAI metrics, Llama Stack / OGX data, Ray cluster YAMLs, inferenceservice-config) | `/tmp/rhoai-upgrade-backup` PVC inside the rhai-cli pod, generated during migration |
 
-Layers 1 + 2 are the baseline that must be in place **before** running any pre-migration prep step. Layer 3 fills up as you run helpers during the prep phase.
+Layers 1 + 2 are the baseline that must be in place **before** running any pre-migration prep step. Layer 3 fills up as you run the `rhai-cli migrate` actions during the prep phase.
 
 **This skill's procedures do NOT include a YAML config export of DSC/DSCI/dashboard-config.** That kind of export duplicates content already in the etcd snapshot, it's incomplete relative to what RHOAI actually owns, and operators self-reconcile so you can't replay it as a restore. Use Layer 1 for the operator-state safety net.
 
@@ -69,7 +69,7 @@ Pass criteria for the latest backup:
 
 If any DataUpload is `Failed` or has `BYTES=0`, the PVC content didn't make it to the BSL. Most common causes: missing `VolumeSnapshotClass` for the storage driver, or the snapshot class isn't labeled `velero.io/csi-volumesnapshot-class=true`.
 
-> **Important — do NOT trust PodVolumeBackup phase=Completed alone.** RHOAI workbenches are managed as StatefulSets. With `defaultVolumesToFsBackup: true` the kopia-style filesystem backup completes cleanly and the PodVolumeBackup shows non-zero bytes, but on restore the StatefulSet controller deletes the Velero-injected Pod (the one carrying the `restore-wait` init container) and recreates it from its template — leaving the PVC empty. The supported approach is CSI snapshot + DataMover (`defaultVolumesToFsBackup: false`, `snapshotMoveData: true`); see [BACKUP-RESTORE.md](../../../../BACKUP-RESTORE.md) for the DPA + Backup CR shape that was validated end-to-end on a 2.25.4 rehearsal cluster.
+> **Important — do NOT trust PodVolumeBackup phase=Completed alone.** RHOAI workbenches are managed as StatefulSets. With `defaultVolumesToFsBackup: true` the kopia-style filesystem backup completes cleanly and the PodVolumeBackup shows non-zero bytes, but on restore the StatefulSet controller deletes the Velero-injected Pod (the one carrying the `restore-wait` init container) and recreates it from its template — leaving the PVC empty. The supported approach is CSI snapshot + DataMover (`defaultVolumesToFsBackup: false`, `snapshotMoveData: true`); see [BACKUP-RESTORE.md](../../../../BACKUP-RESTORE.md) for the DPA + Backup CR shape that was validated end-to-end on a 2.25.10 (and later) rehearsal cluster.
 
 ### Namespace discovery sanity check
 

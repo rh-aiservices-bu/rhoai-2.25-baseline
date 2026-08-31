@@ -26,6 +26,6 @@ log "kserve-modelmesh: PVC + ONNX seed job + OVMS multi-model ServingRuntime + I
 log "  the seed job downloads MobileNetV2 (~14 MB ONNX) into the PVC at mobilenet/1/"
 log "  the ISVC loads via ModelMesh from the PVC; it may take 1-2 min to reach Ready"
 log "  the migration (workshop Module 2) re-hosts this model as a single-model KServe RawDeployment OVMS ISVC"
-log "  VALIDATED on RHOAI 2.25.4 (install bumped to 2.25.6 — re-validate if you change the runtime spec)"
+log "  VALIDATED on RHOAI 2.25.4 (install bumped to 2.25.10 — re-validate if you change the runtime spec)"
 log "  Runtime spec is from the OOTB 'ovms' template (grpc endpoints required,"
 log "  or the modelmesh-controller panics); model serves from PVC with allowAnyPVC=true + podsPerRuntime=1"

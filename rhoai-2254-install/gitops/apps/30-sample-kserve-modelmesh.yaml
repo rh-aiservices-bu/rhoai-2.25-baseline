@@ -16,10 +16,10 @@ spec:
   project: default
   sources:
     - repoURL: https://github.com/rhpds/rhoai-migration-automation.git
-      targetRevision: main
+      targetRevision: "release-3.5"
       path: rhoai-2254-install/30-samples/kserve-modelmesh
     - repoURL: https://github.com/rhpds/rhoai-migration-automation.git
-      targetRevision: main
+      targetRevision: "release-3.5"
       path: rhoai-2254-install/gitops/hooks
       directory:
         include: "rollout-modelmesh-controller.yaml"

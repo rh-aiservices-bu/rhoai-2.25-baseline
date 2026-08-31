@@ -18,16 +18,16 @@ RHCL replaces the standalone Authorino operator and becomes the auth/policy cont
 
 ## Four sub-steps
 
-1. Install Red Hat Connectivity Link (§2.8.10.1 of the migration guide)
-2. For disconnected clusters, mirror the RHCL images (§2.8.10.2)
-3. Configure authentication for each LLMInferenceService — annotation or RBAC (§2.8.10.3)
-4. Freeze LLMInferenceService template annotations (§2.8.10.4)
+1. Install Red Hat Connectivity Link (§2.10.10.1 of the migration guide)
+2. For disconnected clusters, mirror the RHCL images (§2.10.10.2)
+3. Configure authentication for each LLMInferenceService — annotation or RBAC (§2.10.10.3)
+4. Freeze LLMInferenceService template annotations (§2.10.10.4)
 
 ### 1. Install Red Hat Connectivity Link
 
 Skip this if you do not use LLMInferenceService. Otherwise:
 
-**Confirmed subscription fields** (verified on RHCL v1.3.3 / RHOAI 3.3.3 cluster):
+**Confirmed subscription fields** (verified on RHCL v1.3.3 / RHOAI 3.5 cluster):
 
 | Field | Value |
 | --- | --- |
@@ -40,7 +40,7 @@ Skip this if you do not use LLMInferenceService. Otherwise:
 
 The **community** edition lives at `kuadrant-operator` in `community-operators`. **Do not** install that one — it is not supported for RHOAI 3.x and its CRD versions may not match what KServe LLM-d expects. Always use `rhcl-operator` from `redhat-operators`.
 
-> **History — this resolver has bounced on the install mode.** Migration guide §2.8.10.1 directs OperatorHub installation into `kuadrant-system` with mode "A specific namespace on the cluster" (i.e., OwnNamespace). On RHCL v1.3.3 that produces:
+> **History — this resolver has bounced on the install mode.** Migration guide §2.10.10.1 directs OperatorHub installation into `kuadrant-system` with mode "A specific namespace on the cluster" (i.e., OwnNamespace). On RHCL v1.3.3 that produces:
 >
 > ```
 > phase: Failed
@@ -99,11 +99,11 @@ EOF
 
 > **Do not block on Kuadrant `Ready=True` pre-RHOAI-upgrade.** Kuadrant requires a Gateway API provider (Sail-managed Istio or Envoy Gateway). The OCP 4.19+ Cluster Ingress Operator carries the SMv3 install recipe (env vars `GATEWAY_API_OPERATOR_VERSION` / `_CHANNEL` / `_CATALOG` on the `ingress-operator` deployment) but only triggers the install once a `GatewayConfig` CR exists — which is created by the RHOAI 3.x operator post-upgrade. Pre-upgrade, Kuadrant typically sits at `Ready=False / MissingDependency: [Gateway API provider (istio / envoy gateway)] is not installed`. That is **expected** and does not block the migration: the rhai-cli `kuadrant-readiness` check is satisfied by the Kuadrant CR *existing*, not by it being `Ready=True`. On some clusters Kuadrant's reconciler accepts the Gateway API CRDs alone and reaches `Ready=True` pre-upgrade anyway; either state passes the lint. Earlier revisions of this resolver had `oc wait Kuadrant ... --for=condition=Ready --timeout=10m`; that times out on roughly half of pre-upgrade clusters and was misleading.
 
-> **Don't install Sail / Istio / IstioCNI CRs by hand.** Migration guide §2.8.10.1 doesn't include them and the OCP Cluster Ingress Operator owns the SMv3 install (connected) or expects the admin to mirror its image (disconnected, per §2.8.10.2). If Kuadrant is *still* `Ready=False` on a *post-upgrade* cluster, the Cluster Ingress Operator itself is unhealthy — diagnose there. Do not pre-install Sail.
+> **Don't install Sail / Istio / IstioCNI CRs by hand.** Migration guide §2.10.10.1 doesn't include them and the OCP Cluster Ingress Operator owns the SMv3 install (connected) or expects the admin to mirror its image (disconnected, per §2.10.10.2). If Kuadrant is *still* `Ready=False` on a *post-upgrade* cluster, the Cluster Ingress Operator itself is unhealthy — diagnose there. Do not pre-install Sail.
 
 ### 1b. Enable TLS on the Authorino listener
 
-Per migration guide §2.8.10.1, use OpenShift's built-in service signer to mint the listener cert — no cert-manager needed. The Authorino CR enables TLS on the **listener only**; `oidcServer.tls.enabled` stays `false`. Earlier revisions of this resolver instructed cert-manager `ClusterIssuer` + two `Certificate` CRs and TLS on the OIDC server; both were wrong.
+Per migration guide §2.10.10.1, use OpenShift's built-in service signer to mint the listener cert — no cert-manager needed. The Authorino CR enables TLS on the **listener only**; `oidcServer.tls.enabled` stays `false`. Earlier revisions of this resolver instructed cert-manager `ClusterIssuer` + two `Certificate` CRs and TLS on the OIDC server; both were wrong.
 
 ```
 # Annotate the Authorino service so OpenShift's service signer issues the cert
@@ -145,11 +145,11 @@ oc get pods -n kuadrant-system -l authorino-resource=authorino
 
 ### 2. Disconnected environments
 
-If this is a disconnected cluster, mirror the RHCL images into your registry using `oc-mirror`. See migration guide §2.8.10.2 for the exact image list (it spans RHCL operator, Authorino, Limitador, and dependencies). Consult Red Hat Support — the list changes per RHCL version.
+If this is a disconnected cluster, mirror the RHCL images into your registry using `oc-mirror`. See migration guide §2.10.10.2 for the exact image list (it spans RHCL operator, Authorino, Limitador, and dependencies). Consult Red Hat Support — the list changes per RHCL version.
 
 ### 3. Configure authentication for each LLMInferenceService
 
-> **Not Kuadrant `AuthPolicy`.** An earlier version of this resolver recommended creating a `kuadrant.io/v1* AuthPolicy` with `targetRef.kind: LLMInferenceService`. The RHCL webhook rejects that — AuthPolicy only accepts `group: gateway.networking.k8s.io` with `kind: HTTPRoute` or `Gateway`. Per migration guide §2.8.10.3, LLMInferenceService authentication is configured via annotation (dev/test) or plain Kubernetes RBAC (recommended). Both paths below are documented by Red Hat and work pre-upgrade.
+> **Not Kuadrant `AuthPolicy`.** An earlier version of this resolver recommended creating a `kuadrant.io/v1* AuthPolicy` with `targetRef.kind: LLMInferenceService`. The RHCL webhook rejects that — AuthPolicy only accepts `group: gateway.networking.k8s.io` with `kind: HTTPRoute` or `Gateway`. Per migration guide §2.10.10.3, LLMInferenceService authentication is configured via annotation (dev/test) or plain Kubernetes RBAC (recommended). Both paths below are documented by Red Hat and work pre-upgrade.
 
 Pick **one** of the following methods per LLMInferenceService.
 
@@ -216,11 +216,11 @@ TOKEN=$(oc create token "${NAME}-sa" -n "$NS")
 curl -H "Authorization: Bearer $TOKEN" https://<model-url>/v2/models/...
 ```
 
-> **Why this isn't Kuadrant/AuthPolicy on 2.x:** on the pre-upgrade 2.25.4 cluster, LLMInferenceService routes through Service Mesh v2 + Knative, not Gateway API — there are no HTTPRoutes/Gateways for AuthPolicy to target. Gateway API-based auth is a 3.x-era concern handled post-upgrade. The RBAC path here works on both 2.25.4 pre-upgrade and 3.3.2 post-upgrade.
+> **Why this isn't Kuadrant/AuthPolicy on 2.x:** on the pre-upgrade 2.25.x cluster, LLMInferenceService routes through Service Mesh v2 + Knative, not Gateway API — there are no HTTPRoutes/Gateways for AuthPolicy to target. Gateway API-based auth is a 3.x-era concern handled post-upgrade. The RBAC path here works on both 2.25.x pre-upgrade and 3.5 post-upgrade.
 
 ### 4. Freeze the LLMInferenceService template annotations
 
-Pin every LLMInferenceService to the 2.25.4 template set so the chapter-3 upgrade doesn't rewrite templates under a running scheduler. The pins go on `.status.annotations` (via the status subresource), **not** `.metadata.annotations` — and the values are the literal `kserve-config-llm-*` strings the 2.25 scheduler reads, not version labels.
+Pin every LLMInferenceService to the 2.25.x template set so the chapter-3 upgrade doesn't rewrite templates under a running scheduler. The pins go on `.status.annotations` (via the status subresource), **not** `.metadata.annotations` — and the values are the literal `kserve-config-llm-*` strings the 2.25 scheduler reads, not version labels.
 
 Enumerate:
 
@@ -264,7 +264,7 @@ All eight `serving.kserve.io/config-llm-*` keys should be present.
 > - Signed TLS certs via OpenShift service signer are mandatory
 > - Must include `--cert-path` arg and `SSL_CERT_DIR` env var
 >
-> Migration guide §2.8.10.4 has the diff of the updated scheduler block.
+> Migration guide §2.10.10.4 has the diff of the updated scheduler block.
 
 ## Verify
 
@@ -279,7 +279,17 @@ oc get llminferenceservice -A -o json \
 
 Each LLMInferenceService should list all eight `config-llm-*` annotations.
 
+Finally, re-run the lint to confirm the LLMInferenceService findings clear. `lint` is pre-upgrade only (it exits as a no-op once the cluster is already on 3.5):
+
+```
+oc exec -n rhai-migration rhai-cli-0 -- \
+  /opt/rhai-cli/bin/rhai-cli lint --target-version 3.5 --verbose \
+  --checks "*llminferenceservice*"
+```
+
+No `critical` / `prohibited` LLMInferenceService rows should remain.
+
 ## Callouts
 
 - Do not uninstall the standalone Authorino operator (covered in [kserve.md](kserve.md)) until RHCL is up and AuthPolicies are in place — you'll drop auth entirely for a window otherwise.
-- The template versions (`v2.25` above) are placeholders — the actual values are shipped in the rhai-cli helper. Copy them from the tool's output rather than guessing.
+- The template values are shipped in the rhai-cli tool output — the literal `kserve-config-llm-*` strings shown above are the 2.25 scheduler's config keys, not version labels. Copy them from the tool's output rather than guessing.

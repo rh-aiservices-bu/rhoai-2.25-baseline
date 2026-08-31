@@ -4,18 +4,35 @@
 
 ## Why
 
-Pipeline runs keep executing across the upgrade, but DSPA spec, endpoint URLs, and permissions can drift. The `post_upgrade_check.sh` helper confirms every DSPA server pod is healthy after the operator swap. Users then validate that their pipelines actually run.
+Pipeline runs keep executing across the upgrade, but DSPA spec, endpoint URLs, and permissions can drift. The `ai-pipelines.post-upgrade-check` migrate action confirms every DSPA server pod is healthy after the operator swap. Users then validate that their pipelines actually run.
 
 ## Administrator task
 
 ```
 oc exec -n rhai-migration rhai-cli-0 -- \
-  bash /opt/rhai-upgrade-helpers/ai_pipelines/post_upgrade_check.sh
+  /opt/rhai-cli/bin/rhai-cli migrate run --migration ai-pipelines.post-upgrade-check --target-version 3.5.0
 ```
 
-The script prints per-DSPA status. Expect either `All pipelines server pods are healthy` or a note that a pod is in the same state it was before upgrade (idle DSPAs stay idle).
+The action prints per-DSPA status. Expect either `All pipelines server pods are healthy` or a note that a pod is in the same state it was before upgrade (idle DSPAs stay idle).
 
-**Prerequisite** — `post_upgrade_check.sh` diffs against `/tmp/rhoai-upgrade-backup/ai_pipelines/dspa_pre_upgrade_pods.json`. That file is written only by `check_before_upgrade.sh` during the pre-upgrade phase. If you skipped the pre-upgrade check, the post-upgrade script exits with `ERROR: Pre-upgrade state file not found`. Fall back to the manual verification below:
+**Prerequisite — confirm the baseline snapshot exists.** `ai-pipelines.post-upgrade-check` compares post-upgrade pod state against the baseline saved pre-upgrade by `rhai-cli migrate prepare --migration ai-pipelines.pre-upgrade-check`, which writes `/tmp/rhoai-upgrade-backup/ai_pipelines/dspa_pre_upgrade_pods.json` on the rhai-cli PVC. Confirm the file survived the upgrade first:
+
+```
+oc exec -n rhai-migration rhai-cli-0 -- \
+  ls -l /tmp/rhoai-upgrade-backup/ai_pipelines/dspa_pre_upgrade_pods.json
+```
+
+If the file is missing — the pre-upgrade `prepare` step was skipped, or the PVC/StatefulSet was deleted before this check ran — the post-upgrade action exits with `ERROR: Pre-upgrade state file not found`. Fall back to the manual verification below:
+
+```
+# Every DSPA present + Ready
+oc get dspa -A
+
+# Per-DSPA pipeline server pods
+oc get pods -n <dspa-ns> | grep ds-pipeline
+```
+
+For a fuller manual check:
 
 ```
 # Every DSPA Ready

@@ -11,7 +11,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/rhpds/rhoai-migration-automation.git
-    targetRevision: {{ .Values.repoRevision }}
+    targetRevision: "{{ .Values.repoRevision }}"
     path: rhoai-2254-install/gitops/overlays/all
   destination:
     server: https://kubernetes.default.svc

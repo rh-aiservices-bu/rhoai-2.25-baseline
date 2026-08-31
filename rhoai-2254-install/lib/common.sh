@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers for RHOAI 2.25.6 pre-migration install scripts.
+# Shared helpers for RHOAI 2.25.10 pre-migration install scripts.
 
 set -Eeuo pipefail
 
@@ -47,7 +47,7 @@ apply_dir() {
 wait_for_csv_succeeded() {
   local ns="$1" csv_prefix="$2" timeout="${3:-900}"
   # Operator "family" — strip the pinned version so we can fall back to detecting a
-  # higher version of the same operator that's already Succeeded (e.g. rhods-operator.2.25.6
+  # higher version of the same operator that's already Succeeded (e.g. rhods-operator.2.25.10
   # requested but rhods-operator.2.26.0 already installed).
   local family="${csv_prefix%%.[0-9]*}"
   log "waiting for CSV ${csv_prefix}* in ns/${ns} to reach Succeeded (timeout ${timeout}s)"

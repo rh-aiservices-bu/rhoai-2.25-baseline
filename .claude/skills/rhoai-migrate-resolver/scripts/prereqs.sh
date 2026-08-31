@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Read-only check of the static platform prerequisites for an RHOAI 2.25.4 → 3.3.2 migration.
+# Read-only check of the static platform prerequisites for an RHOAI 2.25.10 (and later) → 3.5 migration.
 # See architectural-changes.md § Platform Prerequisites.
 #
 # This script does not modify the cluster. Run as a user with cluster-admin context.
@@ -28,7 +28,7 @@ check() {
   esac
 }
 
-echo "RHOAI 2.25.4 → 3.3.2 migration — platform prereqs"
+echo "RHOAI 2.25.10 → 3.5 migration — platform prereqs"
 echo "==================================================="
 
 # 1. Logged in
@@ -104,8 +104,8 @@ if oc get dsc --no-headers 2>/dev/null | grep -q .; then
   dsc_ver=$(oc get dsc -o jsonpath='{.items[0].status.release.version}' 2>/dev/null || echo unknown)
   case "$dsc_ver" in
     2.25.*) check PASS "DataScienceCluster present" "version=$dsc_ver phase=$dsc_phase" ;;
-    "" | unknown) check WARN "DataScienceCluster present" "version unknown — ensure 2.25.4" ;;
-    *) check WARN "DataScienceCluster present" "version=$dsc_ver — this skill targets 2.25.4" ;;
+    "" | unknown) check WARN "DataScienceCluster present" "version unknown — ensure 2.25.10 or later" ;;
+    *) check WARN "DataScienceCluster present" "version=$dsc_ver — this skill targets 2.25.10 (and later)" ;;
   esac
 else
   check FAIL "DataScienceCluster present" "no DSC found"
@@ -122,4 +122,4 @@ if (( FAIL > 0 )); then
   echo "Fix all FAIL items before continuing. WARN items are informational."
   exit 1
 fi
-echo "Platform prereqs OK. Run 'rhai-cli lint --target-version 3.3.2' next to enumerate migration blockers."
+echo "Platform prereqs OK. Run 'rhai-cli lint --target-version 3.5' next to enumerate migration blockers."

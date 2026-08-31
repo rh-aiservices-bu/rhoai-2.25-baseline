@@ -1,6 +1,6 @@
 ---
 # Standalone Authorino Operator (not Red Hat Connectivity Link).
-# Required by RHOAI 2.25.6 for KServe Serverless auth — replaced by RHCL during migration to 3.3.3.
+# Required by RHOAI 2.25.10 for KServe Serverless auth — replaced by RHCL during migration to 3.5.
 #
 # Pinned to v1.2.4 (last CSV that still serves authorino.kuadrant.io/v1beta2).
 # Newer CSVs (v1.3.x+) drop v1beta2 and break RHOAI 2.25.x odh-model-controller,

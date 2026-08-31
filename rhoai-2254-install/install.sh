@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Driver: installs RHOAI 2.25.6 in its pre-migration ("before") state so the
-# 2.25.6 -> 3.3.3 migration procedure has something to operate on.
+# Driver: installs RHOAI 2.25.10 in its pre-migration ("before") state so the
+# 2.25.10 -> 3.5 migration procedure has something to operate on.
 #
 # Phases:
 #   05-gpu         - optional NFD + NVIDIA GPU Operator. Skipped by default (samples are CPU-only).
 #                    Set INSTALL_GPU=auto or INSTALL_GPU=1 to install. See 05-gpu/run.sh.
-#   10-operators   - installs Service Mesh v2, Serverless, Authorino, RHOAI 2.25.6 operator (pinned)
+#   10-operators   - installs Service Mesh v2, Serverless, Authorino, RHOAI 2.25.10 operator (pinned)
 #   20-dsc         - creates DSCInitialization + DataScienceCluster with all components Managed,
 #                    KServe in Serverless mode, ModelMesh Managed
 #   30-samples     - deploys flag-gated sample workloads that exercise every §2.x "before" step
@@ -36,8 +36,8 @@ main() {
   run_phase 30-samples
 
   log "==="
-  log "RHOAI 2.25.6 pre-migration install complete."
-  log "Next: run the migration assessment from chapter 1, then follow chapter 2 to upgrade to 3.3.3."
+  log "RHOAI 2.25.10 pre-migration install complete."
+  log "Next: run the migration assessment from chapter 1, then follow chapter 3 to upgrade to 3.5."
 }
 
 main "$@"

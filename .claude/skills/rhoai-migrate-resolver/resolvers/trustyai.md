@@ -6,7 +6,7 @@
 
 TrustyAI's storage schema changed between 2.x and 3.x. Without a pre-upgrade backup, historical bias-detection metrics and training data can become unreadable after the migration. GuardrailsOrchestrator's `otelExporter` config survives, but must be captured before the schema migration in case you need to restore manually.
 
-No architectural change driver for TrustyAI itself — this is a data-safety step from migration guide §2.5.
+No architectural change driver for TrustyAI itself — this is a data-safety step from migration guide §2.7.
 
 ## Is TrustyAI even managed?
 
@@ -19,61 +19,62 @@ oc get dsc -o jsonpath='{.items[0].spec.components.trustyai.managementState}'; e
 
 ## § Prepare for backup
 
-Create the backup dir inside the rhai-cli pod's PVC:
+Create the backup dir inside the rhai-cli pod's PVC — this is the `--output-dir` the backup actions below write to:
 
 ```
 oc exec -n rhai-migration rhai-cli-0 -- mkdir -p /tmp/rhoai-upgrade-backup/trustyai
 ```
 
-List the TrustyAIServices so you know what to back up:
+List the TrustyAIServices so you know what to back up (the actions run cluster-wide, but this tells you what to expect):
 
 ```
 oc get trustyaiservice -A -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,STORAGE:.spec.storage.format'
 ```
 
-## § Back up metrics (per §2.5.2 — no helper script)
+## § Back up metrics (§2.7 — `trustyai.metrics`)
 
-There is **no** `backup-metrics.sh` helper shipped with rhai-cli. Earlier revisions of this resolver invoked `backup_metrics.sh`; that command does not exist. Metrics are captured per-namespace with a manual port-forward + curl flow, exactly as written in guide §2.5.2.
-
-For each namespace that has a TrustyAIService:
+The per-namespace port-forward + curl flow (and the `backup-metrics.sh` helper it replaced) are gone. Metrics backup is now the cluster-wide `trustyai.metrics` **prepare** action. `--output-dir` is **required** when running inside the rhai-cli pod — the container root filesystem is read-only, so writing anywhere else fails with `permission denied`. Point it at the pod's backup PVC:
 
 ```
-export NS=<namespace>
-export TAS_NAME=$(oc get trustyaiservice -n "$NS" -o jsonpath='{.items[0].metadata.name}')
-export SVC_PORT=$(oc get svc -n "$NS" "$TAS_NAME" -o jsonpath='{.spec.ports[?(@.name=="http")].port}')
-
-# If $SVC_PORT is empty, pick the http port manually from:
-#   oc get svc -n "$NS" "$TAS_NAME" -o jsonpath='{range .spec.ports[*]}{.name}:{.port}{"\n"}{end}'
-
-oc port-forward -n "$NS" "svc/$TAS_NAME" 8080:${SVC_PORT} &
-export PF_PID=$!; sleep 3
-
-curl -sk -H "Authorization: Bearer $(oc whoami -t)" \
-  "http://localhost:8080/metrics/all/requests" \
-  -o "${BACKUP_DIR}/trustyai-metrics-${NS}-$(date +%Y%m%d-%H%M%S).json"
-
-kill $PF_PID 2>/dev/null
+oc exec -n rhai-migration rhai-cli-0 -- \
+  /opt/rhai-cli/bin/rhai-cli migrate prepare \
+  --migration trustyai.metrics \
+  --target-version 3.5.0 \
+  --output-dir /tmp/rhoai-upgrade-backup/trustyai
 ```
 
-Verify: `jq empty ${BACKUP_DIR}/trustyai-metrics-${NS}-*.json && echo OK`
+> The action operates **cluster-wide** (every namespace with a TrustyAIService) and may emit a benign `phase pre-upgrade but effective phase is post-upgrade` warning — ignore it.
 
-## § Back up data storage (per §2.5.3 — `backup-data.sh`)
-
-The helper script's name is `backup-data.sh` (hyphen). Earlier revisions of this resolver called it `backup_storage.sh`; that path does not exist. The script auto-detects PVC vs DATABASE-backed services per TrustyAIService.
+**Verify from your workstation.** `jq` is no longer present in the container, so read the backup JSON out of the pod's PVC and validate it locally (§2.7):
 
 ```
-oc exec -n rhai-migration rhai-cli-0 -- bash -c '
-  cd /opt/rhai-upgrade-helpers/trustyai
-  ./backup-data.sh --namespace <namespace>
-'
+# list what the action wrote
+oc exec -n rhai-migration rhai-cli-0 -- ls -la /tmp/rhoai-upgrade-backup/trustyai
+
+# validate each metrics JSON from the workstation
+for f in $(oc exec -n rhai-migration rhai-cli-0 -- sh -c 'ls /tmp/rhoai-upgrade-backup/trustyai/*metrics*.json'); do
+  oc exec -n rhai-migration rhai-cli-0 -- cat "$f" | jq empty && echo "OK: $f"
+done
 ```
 
-Results:
+## § Back up data storage (§2.7 — `trustyai.data`)
+
+`backup-data.sh` is gone; data-storage backup is the `trustyai.data` **prepare** action. It auto-detects PVC- vs DATABASE-backed services per TrustyAIService and runs **cluster-wide** (no `--namespace` loop). As with the metrics action, `--output-dir` is **required** inside the pod (read-only root fs → else `permission denied`):
+
+```
+oc exec -n rhai-migration rhai-cli-0 -- \
+  /opt/rhai-cli/bin/rhai-cli migrate prepare \
+  --migration trustyai.data \
+  --target-version 3.5.0 \
+  --output-dir /tmp/rhoai-upgrade-backup/trustyai
+```
+
+Results (under the `--output-dir` you passed):
 
 - **PVC:** `/tmp/rhoai-upgrade-backup/trustyai/trustyai-data-<namespace>-<timestamp>/data/*.csv`
 - **DATABASE:** `/tmp/rhoai-upgrade-backup/trustyai/trustyai-db-<namespace>-<timestamp>/dump.sql`
 
-> The `cannot use rsync: rsync not available in container` warning the guide describes (§2.5.3) is expected — `oc rsync` falls back to `tar`. Backup completes successfully regardless.
+> A `cannot use rsync: rsync not available in container` warning may appear — expected; the copy falls back to `tar` and the backup completes regardless. The benign `phase pre-upgrade but effective phase is post-upgrade` warning may also appear — ignore it.
 
 ## § Guardrails — back up OpenTelemetry exporter config
 
@@ -101,4 +102,4 @@ oc exec -n rhai-migration rhai-cli-0 -- ls -la /tmp/rhoai-upgrade-backup/trustya
 ## Callouts
 
 - TrustyAI backups go on **your** timeline — do them a few days before the upgrade, then repeat just before if data is still accumulating.
-- GPU-deployed guardrails have a known deadlock issue in 3.x (migration guide §4.6.4) — if you use GPU guardrails, open a support case before the migration so Red Hat can advise on sequencing.
+- GPU-deployed guardrails have a known deadlock issue in 3.x (migration guide §4.6; the post-upgrade fix is the `trustyai.break-gpu-deadlock` action) — if you use GPU guardrails, open a support case before the migration so Red Hat can advise on sequencing.
