@@ -88,6 +88,8 @@ Before you begin, open a proactive support case through the Red Hat Customer Por
 
 Complete these checks and preparations before you touch any workload.
 
+> **Run the shell snippets in this guide with `bash`.** They assume bash word-splitting. Under `zsh` (the macOS default) an unquoted `for c in $VAR; do …` iterates **once with the whole string** instead of per item — which silently defeats the Istio-CR safety check in Phase 8.1, among others. Either start a `bash` shell first, or wrap multi-line blocks as `bash -c '…'`. (`for x in $(cmd)` is fine in both shells.)
+
 ## 1.1 Prerequisites
 
 **OpenShift 4.19.9 or later.** Your OpenShift cluster must be at least version 4.19.9. If it is not, upgrade OpenShift first following the [OpenShift Container Platform update documentation](https://docs.redhat.com/en/documentation/openshift_container_platform/4.19/html/updating_clusters/index).
@@ -216,6 +218,9 @@ for isvc in $(oc get isvc -A -o jsonpath='{range .items[*]}{.metadata.namespace}
   URL=$(oc get isvc "$NAME" -n "$NS" -o jsonpath='{.status.url}')
   POD_STATE=$(oc get pods -n "$NS" -l serving.kserve.io/inferenceservice="$NAME" \
     -o jsonpath='{.items[0].status.phase}' 2>/dev/null)
+  # ModelMesh pods don't carry the inferenceservice label — fall back to the ModelMesh selector
+  [ -z "$POD_STATE" ] && POD_STATE=$(oc get pods -n "$NS" -l modelmesh-service=modelmesh-serving \
+    -o jsonpath='{.items[0].status.phase}' 2>/dev/null)
   echo "--- $isvc ---"
   echo "  URL:           $URL"
   echo "  Predictor pod: ${POD_STATE:-no pod}"
@@ -254,9 +259,12 @@ done
 # DSPA: healthz for each pipeline server
 TOKEN=$(oc whoami -t)
 for dspa in $(oc get dspa -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}'); do
-  NS="${dspa%/*}"
-  DSPA_HOST=$(oc get route -n "$NS" -l app.kubernetes.io/name=data-science-pipelines-operator -o jsonpath='{.items[0].spec.host}' 2>/dev/null)
+  NS="${dspa%/*}"; DSPA_NAME="${dspa##*/}"
+  # The API server route is named ds-pipeline-<dspa-name>.
+  # (ds-pipeline-md-<dspa-name> is the metadata/envoy endpoint — not the API.)
+  DSPA_HOST=$(oc get route "ds-pipeline-${DSPA_NAME}" -n "$NS" -o jsonpath='{.spec.host}' 2>/dev/null)
   echo "--- DSPA $dspa https://${DSPA_HOST} ---"
+  [ -z "$DSPA_HOST" ] && { echo "  no route found"; continue; }
   curl -sk -H "Authorization: Bearer $TOKEN" "https://${DSPA_HOST}/apis/v2beta1/healthz" | jq .
 done
 
@@ -264,7 +272,26 @@ done
 oc get raycluster -A -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,DESIRED:.spec.workerGroupSpecs[0].replicas,AVAILABLE:.status.availableWorkerReplicas,STATUS:.status.state'
 ```
 
-Expect DSPA healthz to return healthy and every Ray cluster to show `STATUS=ready` with `AVAILABLE` matching `DESIRED`. Save all output. The cluster's user-visible surface is now known-good.
+Expect DSPA healthz to return healthy and every Ray cluster to show `STATUS=ready` with `AVAILABLE` matching `DESIRED`.
+
+## 2.5 Baseline TrustyAI and Guardrails
+
+Phase 8.5 asks you to confirm each `GuardrailsOrchestrator` reports its services `HEALTHY`. Capture that *now* — an orchestrator pointing at a backend that never existed will report `UNKNOWN` both before and after, and without a baseline you cannot tell that apart from a migration regression:
+
+```
+oc get trustyaiservice -A
+oc get guardrailsorchestrator -A
+
+for g in $(oc get guardrailsorchestrator -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}'); do
+  NS="${g%/*}"; NAME="${g##*/}"
+  HOST=$(oc get route "${NAME}-health" -n "$NS" -o jsonpath='{.spec.host}' 2>/dev/null)
+  echo "--- $g ---"
+  [ -z "$HOST" ] && { echo "  no health route"; continue; }
+  curl -sSk "https://${HOST}/info" -H "Authorization: Bearer $(oc whoami -t)" | jq .
+done
+```
+
+Save all output. The cluster's user-visible surface is now known-good.
 
 ---
 
@@ -286,7 +313,13 @@ The container image is `registry.redhat.io/rhoai/rhai-cli-rhel9:v3.5.0` (binary 
 
 > **Namespace convention.** This guide runs the rhai-cli pod in a namespace called **`rhai-migration`** and uses that name in every pod-related command (`oc exec`, `oc cp`, cleanup). It is a management namespace, **separate from your workload namespaces** (your model-serving projects, `redhat-ods-applications`, etc.). If you use a different project, create it first (`oc new-project rhai-migration` or your own name) and substitute it consistently wherever you see `rhai-migration` below.
 
-Create the StatefulSet in that namespace:
+Create the namespace first — `oc apply -n rhai-migration` fails if it does not exist:
+
+```
+oc new-project rhai-migration
+```
+
+Then create the StatefulSet in it:
 
 ```
 cat <<'EOF' | oc apply -n rhai-migration -f -
@@ -357,6 +390,33 @@ In 3.5 the per-component helper scripts (`/opt/rhai-upgrade-helpers/*.sh`, `ray_
 | CLI binary | `/opt/rhai-cli/bin/rhai-cli` | Cluster scan and migration-readiness analysis (`lint`), plus the `rhai-cli migrate` remediation actions. |
 
 Each action runs as `rhai-cli migrate run|prepare|list --migration <name> --target-version 3.5.0` (some accept `--dry-run`). The `migrate` action auto-detects whether it is a pre- or post-upgrade step. The actions by component (referenced from the phases that use them):
+
+> ### ⚠️ Every `migrate run` prompts for confirmation — and a declined prompt looks like success
+>
+> `rhai-cli migrate run` asks before it changes anything:
+>
+> ```
+> About to convert 2 InferenceService(s) from Serverless to RawDeployment
+> Proceed with conversion? [y/N]:
+> ```
+>
+> Answer `y`. **If the prompt does not get a `y` — including when the command runs non-interactively, in a pipeline, or through `oc exec` without a TTY — the action cancels and reports:**
+>
+> ```
+>     → User cancelled Serverless to RawDeployment conversion
+> Migration modelserving.serverless-to-raw completed with skipped steps
+> All migrations completed (some steps were skipped).
+> ```
+>
+> That wording reads like success and the command **exits 0**, but nothing was migrated. Treat **"completed with skipped steps"** as a signal to re-read the output, not as a pass — and always confirm the result independently (e.g. `oc get isvc -A`) rather than trusting the closing line.
+>
+> To run non-interactively, pass **`-y` / `--yes`** (`rhai-cli migrate run --help`: *"Skip confirmation prompts"*). The examples throughout this guide omit it so you see each prompt; add it when scripting:
+>
+> ```
+> rhai-cli migrate run --migration <name> --target-version 3.5.0 --yes
+> ```
+>
+> **Run the longer actions in a session that will not time out.** `modelserving.serverless-to-raw` deletes and recreates each ISVC serially and took over two minutes for just two ISVCs. If the shell is interrupted mid-run, ISVCs can be left deleted or half-converted — use `tmux`/`screen` (or `nohup` inside the pod), and re-check `oc get isvc -A` before re-running anything.
 
 | Component | Migrate action(s) | Used for |
 |-----------|-------------------|----------|
@@ -455,6 +515,16 @@ Write the assessment to YAML and attach it to your proactive support case:
 rhai-cli lint --target-version 3.5 --output yaml > /tmp/rhoai-upgrade-backup/rhai-cli-output.yaml
 ```
 
+> While blockers remain, this command **exits 1 and prints an error block on stderr** — the YAML still lands on stdout correctly:
+>
+> ```
+> error:
+>   code: LINT_BLOCKED
+>   message: 'prohibited or blocking findings detected: upgrade cannot proceed'
+> ```
+>
+> That is the expected pre-remediation result, not a tool failure. Check the file was written (`ls -l`) rather than judging by the exit code.
+
 Copy it from the pod to your workstation (run from outside the pod):
 
 ```
@@ -526,7 +596,9 @@ Every Serverless and ModelMesh ISVC in that list must be converted. Already-RawD
 
 ## 4.5 Convert Serverless InferenceServices to RawDeployment
 
-`modelserving.serverless-to-raw` is the official migrate action. In 3.5 it runs **cluster-wide and non-interactive** — it converts Serverless ISVCs across *all* namespaces in one invocation (no per-namespace loop, no interactive model selection or resource-naming prompt). It converts each ISVC to RawDeployment in place, keeping the original name, and handles the authentication resources (ServiceAccount, Role, RoleBinding) automatically.
+`modelserving.serverless-to-raw` is the official migrate action. In 3.5 it runs **cluster-wide** — it converts Serverless ISVCs across *all* namespaces in one invocation (no per-namespace loop, and no interactive model selection or resource-naming prompt as in 2.x). It converts each ISVC to RawDeployment in place, keeping the original name, and handles the authentication resources (ServiceAccount, Role, RoleBinding) automatically.
+
+> It still asks for a single **`Proceed with conversion? [y/N]`** confirmation before making changes — answer `y`, or pass `--yes`. See the callout in 3.1: a declined prompt reports "completed with skipped steps" and exits 0 without migrating anything.
 
 **1. Identify Serverless ISVCs:**
 
@@ -571,7 +643,7 @@ oc get isvc -A -o json | jq -r '.items[]
 
 ModelMesh is *multi-model serving* — one ServingRuntime hosts many models keyed by a storage path. 3.x has no ModelMesh, so each model is re-deployed as a *single-model* KServe RawDeployment ISVC backed by a single-model ServingRuntime, pointing `storageUri` at the same model data. For a natively-supported format (ONNX, OpenVINO IR) this is a true re-host — no model conversion, no data movement.
 
-`modelserving.modelmesh-to-raw` is the official migrate action. In 3.5 it runs **in place in a single namespace and non-interactive** — there is no cross-namespace source→target step and no interactive model/template selection. It discovers the ModelMesh ISVCs, transforms each to a single-model RawDeployment ServingRuntime + ISVC keeping the original name, and reports a single `Namespace` in its summary. (Because it works in place, the old *scale-the-ModelMesh-runtime-to-zero to release an RWO PVC* dance no longer applies.)
+`modelserving.modelmesh-to-raw` is the official migrate action. In 3.5 it runs **in place in a single namespace** — there is no cross-namespace source→target step and no interactive model/template selection (it does still ask for the one `[y/N]` confirmation; see 3.1). It discovers the ModelMesh ISVCs, transforms each to a single-model RawDeployment ServingRuntime + ISVC keeping the original name, and reports a single `Namespace` in its summary. (Because it works in place, the old *scale-the-ModelMesh-runtime-to-zero to release an RWO PVC* dance no longer applies.)
 
 **1. Identify ModelMesh ISVCs:**
 
@@ -597,7 +669,14 @@ The action keeps the original ISVC name — only `.status.deploymentMode` flips 
 > 2. **OVMS crash-loops** — `Configuration file is invalid /models/model_config_list.json` (it kept the multi-model launch args).
 > 3. **Pod runs but stays `0/1`** — the readiness probe never passes (no container port declared; OVMS serves REST on 8888 but the probe defaults to `tcpSocket:8080`).
 >
-> Apply all three fixes. Example for `ml-project-c/my-modelmesh-isvc`, runtime `ovms-mm`, PVC `model-store`, model path `mobilenet` (resolve the PVC name from the ModelMesh `storage-config` secret's key, and substitute your own values):
+> Apply all three fixes. Example for `ml-project-c/my-modelmesh-isvc`, runtime `ovms-mm`, PVC `model-store`, model path `mobilenet` — substitute your own values.
+>
+> **Resolving the PVC name.** The `storage-config` secret's *key* (e.g. `pvc-models`) is a storage-profile alias, **not** the PVC name. Get the real PVC from the namespace, and the model path from the ISVC's `storage.path`:
+>
+> ```bash
+> oc get pvc -n <ns>                                                            # -> model-store
+> oc get isvc <name> -n <ns> -o jsonpath='{.spec.predictor.model.storage.path}{"\n"}'   # -> mobilenet
+> ```
 >
 > ```bash
 > # 1. PVC storage → storageUri
@@ -625,7 +704,27 @@ The action keeps the original ISVC name — only `.status.deploymentMode` flips 
 oc get isvc <name> -n <namespace> -o jsonpath='mode={.status.deploymentMode} ready={.status.conditions[?(@.type=="Ready")].status}{"\n"}'
 ```
 
-**4. Delete any legacy ModelMesh ISVCs and multi-model ServingRuntimes** (after confirming the new RawDeployment services work). For the in-place conversion these usually return zero rows already; the sweep catches any leftovers:
+**4. Delete any legacy ModelMesh ISVCs and multi-model ServingRuntimes** (after confirming the new RawDeployment services work). For the in-place conversion these usually return zero rows already; the sweep catches any leftovers.
+
+> ### ⚠️ Confirm `multiModel: false` before running the ServingRuntime sweep
+>
+> Because `modelserving.modelmesh-to-raw` converts the runtime **in place**, the runtime it flipped is the *same object* your new RawDeployment ISVC now depends on. The sweep below deletes runtimes where `.spec.multiModel == true` — so if the flip did not actually take effect, it deletes the runtime the working model needs.
+>
+> Check first, and only sweep if this returns `false`:
+>
+> ```bash
+> oc get servingruntime <name> -n <ns> -o jsonpath='{.spec.multiModel}{"\n"}'
+> ```
+>
+> If it still reports `true` while the ISVC is Ready on RawDeployment, re-apply the conversion's own changes rather than deleting the runtime:
+>
+> ```bash
+> oc patch servingruntime <name> -n <ns> --type=merge -p '{"spec":{"multiModel":false}}'
+> oc patch servingruntime <name> -n <ns> --type=json \
+>   -p '[{"op":"replace","path":"/spec/containers/0/name","value":"kserve-container"}]'
+> ```
+>
+> Cross-check that no runtime you are about to delete is referenced by a live ISVC (`.spec.predictor.model.runtime`).
 
 ```
 # Leftover ModelMesh ISVCs
@@ -810,12 +909,12 @@ Ordering within the phase:
 2. **Delete LlamaStackDistributions** (delete-and-replace; no upgrade path).
 3. Verify the components you are *not* demoing — **Model Registry, Feature Store, KFTO** — are healthy and inventoried.
 4. Back up and update the **`inferenceservice-config` ConfigMap** (after every ISVC is RawDeployment, before the disables).
-5. **Disable the removed components** — Kueue, Ray/CodeFlare, ModelMesh, KServe Serverless — then tear down the **Service Mesh** dependency.
+5. **Disable the removed components** — Kueue, CodeFlare, ModelMesh, KServe Serverless — then tear down the **Service Mesh** dependency. (Leave the `ray` component `Managed`; it becomes KubeRay in 3.5 — see 5.7.)
 6. **Uninstall the 2.x serving operators** and confirm a clean assessment.
 
 ## 5.1 Back up the RayClusters
 
-CodeFlare is removed in 3.5; KubeRay takes over RayCluster management. Existing RayCluster CRs survive the controller swap, but back them up first in case reconciliation drops fields.
+CodeFlare is removed in 3.5; **KubeRay** takes over RayCluster management — and KubeRay is provisioned by the `ray` DSC component, which stays `Managed`. Only `codeflare` is disabled here. Existing RayCluster CRs survive the controller swap, but back them up first in case reconciliation drops fields.
 
 > **Set CodeFlare to `Removed` manually *before* the backup.** Unlike the 2.x helper script, the `raycluster.backup` action does **not** flip `codeflare` for you — and it **fails if CodeFlare is still `Managed`**. Disabling CodeFlare is also a hard 3.5 upgrade prerequisite, required even if you have no RayClusters:
 >
@@ -838,7 +937,16 @@ rhai-cli migrate run --migration raycluster.backup --target-version 3.5.0 \
   --raycluster-output-dir /tmp/rhoai-upgrade-backup/ray_cluster
 ```
 
-The action saves each RayCluster CR under the output directory. Copy the backup off the pod, and confirm every cluster is still `ready`:
+The action saves each RayCluster CR under the output directory, in **two subdirectories**:
+
+```
+<output-dir>/rhoai-2.x/raycluster-<name>-<ns>.yaml    # the CR as it exists today
+<output-dir>/rhoai-3.x/raycluster-<name>-<ns>.yaml    # the converted 3.x-shaped CR
+```
+
+Note which is which — Phase 8.4's `--raycluster-from-backup` needs the path to the right one. The `rhoai-3.x` copies are noticeably smaller (the oauth-proxy sidecar, ServiceAccount and volumes are stripped); that trimmed shape is what a correctly migrated cluster should end up running.
+
+Copy the backup off the pod, and confirm every cluster is still `ready`:
 
 ```
 oc cp rhai-migration/rhai-cli-0:/tmp/rhoai-upgrade-backup/ray_cluster ./ray-backup
@@ -873,6 +981,15 @@ rhai-cli migrate prepare --migration trustyai.data --target-version 3.5.0 \
 ```
 
 > These actions emit a benign `phase pre-upgrade but effective phase is post-upgrade` warning — ignore it.
+
+> **A PVC-backed TrustyAIService prints an alarming but benign error.** The PVC path emits an unhandled Kubernetes client error and still exits 0:
+>
+> ```
+> E0831 ... "Unhandled Error" err="io: read/write on closed pipe" logger="UnhandledError"
+>     ✓ Backed up 0 file(s) to .../trustyai-data-<ns>-<timestamp>
+> ```
+>
+> This is expected for an empty PVC (DATABASE-backed services dump normally — e.g. `Dumped 844 lines`). Do not treat it as a failure, but **do** confirm the file count matches what the PVC actually holds rather than trusting the `✓`.
 
 Verify the metrics backup **from your workstation** by reading the file back out of the pod's PVC — the container no longer ships `jq`, so pipe to `jq` locally:
 
@@ -991,11 +1108,11 @@ oc get pytorchjobs -A
 
 With every ISVC on RawDeployment, apply the hardware-profile ignorelist changes. This must happen **after** conversion (Phase 4) and **before** the disables below, so the upgrade reconciler honors the new ignorelist.
 
-Back up first (run on your workstation / any `oc` session — the ConfigMap lives in the applications namespace):
+Back up first. Run this on your workstation — `/tmp/rhoai-upgrade-backup` is the *pod's* PVC mount and does not exist locally, so write to a local path:
 
 ```
 oc get configmap inferenceservice-config -n redhat-ods-applications -o yaml \
-  > /tmp/rhoai-upgrade-backup/inferenceservice-config-backup.yaml
+  > ./inferenceservice-config-backup.yaml
 ```
 
 Then run the action from inside the rhai-cli pod. It adds `opendatahub.io/hardware-profile-name` and `opendatahub.io/hardware-profile-namespace` to the disallowed list (so HardwareProfiles migrate cleanly) and marks the ConfigMap `opendatahub.io/managed=false` so InferenceServices are not redeployed during the upgrade:
@@ -1050,16 +1167,25 @@ oc patch $(oc get dsc -o name | head -n1) --type=merge -p '{
 
 > **Namespace-label caveat (Unmanaged).** Label each Kueue-managed project `kueue.openshift.io/managed=true`. On a labeled namespace, these kinds must carry the `kueue.x-k8s.io/queue-name` annotation or admission is rejected: **pytorchjob, notebook, rayjob, raycluster, inferenceservice, llminferenceservice**.
 
-**Ray and CodeFlare** (two separate DSC components, even though the assessment reports the blocker under `ray/removal`; you already set `codeflare` to `Removed` manually in 5.1, so this patch just confirms it and also removes `ray`):
+**CodeFlare** (the assessment reports this blocker under `ray/removal`, but `ray` and `codeflare` are two *separate* DSC components — only CodeFlare is removed in 3.5). You already set `codeflare` to `Removed` manually in 5.1; this patch just confirms it:
 
 ```
 oc patch $(oc get dsc -o name | head -n1) --type=merge -p '{
-  "spec": { "components": {
-    "codeflare": { "managementState": "Removed" },
-    "ray":       { "managementState": "Removed" }
-  } }
+  "spec": { "components": { "codeflare": { "managementState": "Removed" } } }
 }'
 ```
+
+> ### ⚠️ Do **not** set `ray` to `Removed` if you have RayClusters to carry across
+>
+> `ray` is **not** a removed component — it survives into 3.5, where it provisions the **KubeRay** operator that takes over RayCluster management from CodeFlare. Phase 8.4 (`raycluster.migrate`) depends on KubeRay running.
+>
+> If you set `ray: Removed`, there is no KubeRay operator on the cluster and your migrated RayClusters are left **unmanaged**. This fails silently and is easy to miss:
+>
+> - `raycluster.migrate` still reports `Migrated: N, Failed: 0` and `Status: ready`, because it only rewrites the CRs.
+> - The CRs *are* rewritten correctly (oauth-proxy sidecar, ServiceAccount and volumes stripped), but **nothing recreates the pods** — the head pod keeps running the old 2.x spec, oauth-proxy sidecar included.
+> - `oc get raycluster -A` keeps reporting `STATUS=ready` with the old `AVAILABLE` count even after you delete the head pod, because no controller is updating the status. The status goes stale rather than going red.
+>
+> Only set `ray: Removed` if you are deliberately dropping Ray entirely and have no RayClusters to preserve. Otherwise leave it `Managed` and verify KubeRay comes up after the upgrade (Phase 8.4).
 
 **ModelMesh Serving:**
 
@@ -1116,16 +1242,23 @@ OpenShift Serverless, Service Mesh 2, and standalone Authorino were dependencies
 # Standalone Authorino — only if Red Hat Connectivity Link is NOT installed
 # (in 3.x, Authorino is needed only via RHCL for LLMInferenceService)
 oc -n openshift-operators delete subscription authorino-operator --ignore-not-found
-oc get csv -A 2>/dev/null | awk '/authorino-operator\./ {print "-n "$1, $2}' | xargs -L1 oc delete csv
 
 # OpenShift Serverless
 oc -n openshift-serverless delete subscription serverless-operator --ignore-not-found
-oc get csv -A 2>/dev/null | awk '/serverless-operator\./ {print "-n "$1, $2}' | xargs -L1 oc delete csv
 
 # Service Mesh 2 — safe now that the SMCP and SMMR are gone
 oc -n openshift-operators delete subscription servicemeshoperator --ignore-not-found
-oc get csv -A 2>/dev/null | awk '/servicemeshoperator\./ {print "-n "$1, $2}' | xargs -L1 oc delete csv
+
+# Then delete each operator's SOURCE CSV — the one in its own install namespace.
+# OLM garbage-collects the per-namespace copies automatically.
+oc get csv -A -o json | jq -r '.items[]
+  | select(.metadata.labels."olm.copiedFrom" == null)
+  | select(.metadata.name | test("^(authorino-operator|serverless-operator|servicemeshoperator)\\."))
+  | "\(.metadata.namespace) \(.metadata.name)"' \
+  | while read -r ns name; do echo "Deleting $ns/$name"; oc -n "$ns" delete csv "$name"; done
 ```
+
+> **Delete only the source CSV, not every copy.** These three operators install with an all-namespaces OperatorGroup, so OLM mirrors each CSV into *every* namespace. On a 109-project cluster that is 108 copies per operator — a `oc get csv -A | awk … | xargs -L1 oc delete csv` sweep would fire ~324 deletes against objects OLM owns. Deleting the single source CSV (the one without the `olm.copiedFrom` label) removes all copies: verified here, 324 rows went to 0.
 
 > **Do not remove `servicemeshoperator3` (OSSM v3).** Only the v2 operator (`servicemeshoperator`) is a leftover here. `servicemeshoperator3` is installed by the Cluster Ingress Operator to back the 3.x **Gateway API** — it is a required part of the new platform, not a migration remnant. The `awk` filters above use `servicemeshoperator\.` (literal dot) so they match only v2 and never touch v3; if you uninstall via the console, pick **Red Hat OpenShift Service Mesh 2**, not the v3 operator.
 
@@ -1152,7 +1285,7 @@ Prepare the OpenShift AI Operator subscription and confirm the cluster is upgrad
 3. Confirm operator and component pods are `Running` / `Ready=True` in `redhat-ods-operator` and `redhat-ods-applications`.
 4. **Re-run the full assessment** and confirm zero critical findings:
    ```
-   rhai-cli lint --target-version 3.5 | grep -E 'Total:|FAIL|PASS'
+   rhai-cli lint --target-version 3.5 | grep -E 'Total:|FAIL|PASS|WARNING|PROHIBITED'
    ```
 
 `Failed: 0` and a `Ready` DSC mean the platform is upgrade-ready.
@@ -1254,6 +1387,15 @@ Evaluate whether OOTB image tags need updating:
 - **Jupyter-based** workbenches — *recommended* to update to the latest tag (`2025.2`).
 - **code-server** workbenches — **required** to be on `2025.2`.
 - **RStudio** (BuildConfig) — **required** to be on `latest`; needs a fresh build *after* the upgrade.
+
+**Check which tags the ImageStream actually offers before planning a bump** — the target tag may not exist yet on your cluster:
+
+```
+oc get imagestream <name> -n redhat-ods-applications \
+  -o jsonpath='{range .spec.tags[*]}{.name}{"\n"}{end}'
+```
+
+The loop below covers **code-server only** (the one that is *required*). The Jupyter bump is optional and manual: if the Jupyter ImageStream carries no `2025.2` tag, leave it — a Jupyter workbench on `2025.1` still lints as *compatible* for 3.5.
 
 Find any code-server workbench on an old tag, then bump them all in one loop:
 
@@ -1441,13 +1583,15 @@ oc get crd <jobsetoperator-crd-name> -o jsonpath='{.spec.group}/{.spec.versions[
 
 # substitute the group/version reported above into apiVersion:
 cat <<'EOF' | oc apply -f -
-apiVersion: operator.jobset.x-k8s.io/v1alpha1   # <-- replace with the value from the CRD above
+apiVersion: operator.openshift.io/v1   # <-- confirm against the CRD above
 kind: JobSetOperator
 metadata:
   name: cluster
 spec: {}
 EOF
 ```
+
+> On `jobset-operator.v1.0.0` the operand CRD is **`jobsetoperators.operator.openshift.io`**, served at **`operator.openshift.io/v1`** — as shown above. Earlier drafts of this guide used `operator.jobset.x-k8s.io/v1alpha1`, which is a different API group entirely and fails with `no matches for kind "JobSetOperator"`. Always confirm with the `oc get crd` command above before applying.
 
 Confirm the CRD is present:
 
@@ -1652,18 +1796,49 @@ Notify users they can restart their workbenches, and confirm they can reach the 
 
 ## 8.4 Migrate the RayClusters to KubeRay
 
-CodeFlare is gone; KubeRay manages Ray clusters directly. This step has a **Gateway API prerequisite** — confirm the Data Science Gateway is `Programmed=True` (8.1) before running it. Complete the workbench migration (8.3) first, then run the post-upgrade migration (your Phase 5.1 backups are the safety net). Preview with `--dry-run` (it replaces the old `list` subcommand) if desired:
+CodeFlare is gone; KubeRay manages Ray clusters directly. This step has a **Gateway API prerequisite** — confirm the Data Science Gateway is `Programmed=True` (8.1) before running it. Complete the workbench migration (8.3) first, then run the post-upgrade migration (your Phase 5.1 backups are the safety net).
+
+**Prerequisite — confirm the KubeRay operator is actually running.** `raycluster.migrate` only rewrites the RayCluster CRs; KubeRay is what reconciles them into pods. If `ray` was set to `Removed` on the DSC (see the warning in 5.7), this returns nothing and the migration will appear to succeed while leaving your clusters unmanaged:
+
+```
+oc get pods -A | grep -i kuberay        # must show kuberay-operator Running
+oc get dsc -o jsonpath='{.items[0].spec.components.ray.managementState}{"\n"}'   # must be Managed
+```
+
+If it is missing, set `ray` back to `Managed` and wait for the operator before continuing:
+
+```
+oc patch $(oc get dsc -o name | head -n1) --type=merge \
+  -p '{"spec":{"components":{"ray":{"managementState":"Managed"}}}}'
+```
+
+Preview with `--dry-run` (it replaces the old `list` subcommand) if desired:
 
 ```
 rhai-cli migrate run --migration raycluster.migrate --target-version 3.5.0 --dry-run   # "=== DRY RUN MODE ==="; Summary: N to migrate, M already migrated
 rhai-cli migrate run --migration raycluster.migrate --target-version 3.5.0             # all clusters; or scope to one with --raycluster-cluster / --raycluster-namespace / --raycluster-from-backup
 ```
 
-Each migrated cluster restarts its head + worker pods (temporary downtime). Verify every RayCluster returns to `ready`:
+Each migrated cluster should restart its head + worker pods (temporary downtime).
+
+**Verify properly — `STATUS=ready` alone is not enough.** The action rewrites the CR but does not itself recreate pods, and the RayCluster status can stay stale on the *old* pods. Confirm the pods were actually recreated against the migrated spec: they should be freshly aged, and the head pod should now have a **single `ray-head` container with no `oauth-proxy` sidecar**:
 
 ```
 oc get raycluster -A
+oc get pods -n <ns> -o wide          # pod AGE should be recent, not pre-upgrade
+oc get pod -n <ns> -l ray.io/node-type=head \
+  -o jsonpath='{range .items[*]}{.metadata.name}: {range .spec.containers[*]}{.name} {end}{"\n"}{end}'
 ```
+
+If a head pod still lists `oauth-proxy`, or its age predates the migration, KubeRay has not adopted the new spec. Delete the stale pods so KubeRay recreates them (the CR is already correct, so this is safe):
+
+```
+oc delete pod -n <ns> -l ray.io/cluster=<cluster-name>
+```
+
+Then re-check that each cluster shows `STATUS=ready` with `AVAILABLE` matching `DESIRED` and every pod `1/1`.
+
+> **Leftover 2.x dashboard resources.** The migration deletes the CodeFlare oauth-proxy ServiceAccounts but leaves the old `ray-dashboard-<cluster>` Routes and `<cluster>-oauth-<hash>` Services behind. Those Routes now return **HTTP 403** because the ServiceAccount they authenticated against is gone. They are inert leftovers — remove them in Phase 10.
 
 ## 8.5 Patch the GuardrailsOrchestrators
 
@@ -1675,12 +1850,26 @@ rhai-cli migrate run --migration trustyai.patch-guardrails --target-version 3.5.
 rhai-cli migrate run --migration trustyai.migrate-gorch-otel-exporter --target-version 3.5.0
 ```
 
-Verify each orchestrator's `/info` endpoint reports every service `HEALTHY`:
+Verify each orchestrator's `/info` endpoint — every service that was `HEALTHY` in your Phase 2 baseline should still be `HEALTHY`:
 
 ```
 GORCH_ROUTE_HEALTH=$(oc get routes -n <namespace> "<gorch-name>-health" -o jsonpath='{.spec.host}')
 curl -sSk "https://${GORCH_ROUTE_HEALTH}/info" -H "Authorization: Bearer $(oc whoami -t)" | jq .
 ```
+
+> **`UNKNOWN` is not necessarily a migration failure.** `/info` reports the health of the *backends* the orchestrator points at (the generator and each detector), not the orchestrator itself. If those backends don't exist, you get:
+>
+> ```json
+> {"services":{"openai":{"status":"UNKNOWN","code":500,"reason":"client error (Connect)"}}}
+> ```
+>
+> Check what the orchestrator is configured to reach before assuming the upgrade broke it:
+>
+> ```
+> oc get configmap <orchestratorConfig-name> -n <ns> -o jsonpath='{.data.config\.yaml}'
+> ```
+>
+> The readinessProbe patch applied above is verified by the **orchestrator pod reaching `1/1`**, not by `/info`. Compare `/info` against your Phase 2 baseline to tell a real regression from a pre-existing gap.
 
 ## 8.6 Verify TrustyAI and restore data if needed
 
@@ -1751,7 +1940,18 @@ oc get pytorchjobs -A
 rhai-cli migrate run --migration training.verify-workloads --target-version 3.5.0
 ```
 
-Expect `nothing to migrate` / `safe to proceed`. Any workload still `Running`/`Created` is reported as a **[BLOCKER]**. A PyTorchJob in a failed state usually means the job itself failed, not the upgrade — inspect it with:
+Expect `nothing to migrate` / `safe to proceed`. Any workload still `Running`/`Created` is reported as a **[BLOCKER]**.
+
+> **A still-running PyTorchJob is the expected, healthy outcome here** — KFTO v1 workloads are supposed to carry across the upgrade. The `[BLOCKER]` refers to the *future* Trainer v2 migration, not this one. Be aware that in that case the action exits **non-zero** and closes with:
+>
+> ```
+> Migration training.verify-workloads completed with failures
+> Suggestion: Unexpected error, please report a bug
+> ```
+>
+> That is not an actual bug and needs no support case. Confirm the job list matches your Phase 5.5 inventory and move on.
+
+A PyTorchJob in a failed state usually means the job itself failed, not the upgrade — inspect it with:
 
 ```
 oc describe pytorchjob <name> -n <ns>
@@ -1784,7 +1984,7 @@ Model-serving troubleshooting matrix:
 Re-run the full lint on the upgraded cluster and confirm zero critical/failed findings:
 
 ```
-rhai-cli lint --target-version 3.5 | grep -E 'Total:|FAIL|PASS'
+rhai-cli lint --target-version 3.5 | grep -E 'Total:|FAIL|PASS|WARNING|PROHIBITED'
 ```
 
 `Failed: 0` means the platform-side migration is clean. Warnings are acceptable.
@@ -1841,10 +2041,29 @@ oc get isvc -A -o json | jq -r '[.items[] | select(.status.conditions[]? | selec
 
 ## 9.2 Reach each workbench through the Gateway
 
-3.x workbenches sit behind the Gateway at `https://<gateway-host>/notebook/<ns>/<name>/`. A 2xx/3xx confirms the route + kube-rbac-proxy work:
+3.x workbenches sit behind the Gateway at `https://<gateway-host>/notebook/<ns>/<name>/`. A 2xx/3xx confirms the route + kube-rbac-proxy work.
+
+> The gateway domain is on the GatewayConfig **`.status.domain`** (there is no `.spec.hostname`). If `GATEWAY_HOST` comes back empty every probe returns `HTTP 000` — that is the wrong jsonpath, not a broken gateway.
+
+Start the workbenches first (Phase 6.5 stopped them all) by removing the stop annotation, then probe:
 
 ```
-GATEWAY_HOST=$(oc get gatewayconfig default-gateway -o jsonpath='{.spec.hostname}')
+for row in $(oc get notebooks -A --no-headers | awk '{print $1"/"$2}'); do
+  ns="${row%/*}"; name="${row##*/}"
+  oc -n "$ns" annotate notebook "$name" kubeflow-resource-stopped- --overwrite
+done
+```
+
+Confirm each pod came back with the **`kube-rbac-proxy`** sidecar (not `oauth-proxy`) — this is the proof that 8.3 took effect:
+
+```
+oc get pods -n <ns> -o jsonpath='{range .items[*]}{.metadata.name}: {range .spec.containers[*]}{.name} {end}{"\n"}{end}'
+```
+
+Then probe each workbench through the Gateway:
+
+```
+GATEWAY_HOST=$(oc get gatewayconfig default-gateway -o jsonpath='{.status.domain}')
 for nb in $(oc get notebook -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}'); do
   NS="${nb%/*}"; NAME="${nb##*/}"
   CODE=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "https://${GATEWAY_HOST}/notebook/${NS}/${NAME}/")
@@ -1855,8 +2074,8 @@ done
 ## 9.3 Confirm the DSPA serves the pipelines API
 
 ```
-NS=<dspa-namespace>; TOKEN=$(oc whoami -t)
-DSPA_HOST=$(oc get route -n "$NS" -l app.kubernetes.io/name=data-science-pipelines-operator -o jsonpath='{.items[0].spec.host}' 2>/dev/null)
+NS=<dspa-namespace>; DSPA_NAME=<dspa-name>; TOKEN=$(oc whoami -t)
+DSPA_HOST=$(oc get route "ds-pipeline-${DSPA_NAME}" -n "$NS" -o jsonpath='{.spec.host}' 2>/dev/null)
 curl -sk -H "Authorization: Bearer $TOKEN" "https://${DSPA_HOST}/apis/v2beta1/healthz" | jq .
 oc get dspa -A -o json | jq -r '[.items[] | select(.status.conditions[]? | select(.type=="Ready" and .status=="True"))] | length'
 ```
@@ -1905,6 +2124,18 @@ Post-migration housekeeping:
 - Communicate the new **model endpoint URLs** and **dashboard URL** (Gateway API) to downstream consumers and users; the 2.x URLs no longer resolve.
 - Update runbooks/documentation that reference the removed **Serverless** or **ModelMesh** deployment modes, and note that **`RawDeployment` is now displayed as `Standard`**.
 - If any 2.x serving operators (Serverless, Service Mesh 2, standalone Authorino) or the `knative-serving` namespace remain, remove them (see the 8.8 matrix).
+- Remove the **legacy Ray dashboard resources** left behind by `raycluster.migrate` (Phase 8.4). The old CodeFlare Routes now return HTTP 403 because the oauth-proxy ServiceAccounts they authenticated against were deleted during the migration:
+
+  ```
+  oc delete route -n <ns> -l ray.io/cluster=<cluster-name> --ignore-not-found
+  oc get route,svc -n <ns> | grep -E 'ray-dashboard-|-oauth-'   # confirm nothing stale remains
+  ```
+
+- Optionally remove the harmless leftover **`*.maistra.io` CRDs** (servicemeshcontrolplanes, servicemeshmemberrolls, federation, …). Unlike the `*.istio.io` CRDs removed in 8.1, these hold 0 CRs and do not block the sail controller:
+
+  ```
+  oc get crd -l maistra-version -o custom-columns=NAME:.metadata.name,VER:.metadata.labels.maistra-version
+  ```
 
 ---
 
