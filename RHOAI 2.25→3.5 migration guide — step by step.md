@@ -1,6 +1,6 @@
 # Migrate from Red Hat OpenShift AI 2.25.10 (and later) to 3.5
 
-> **About this guide.** This is a task-ordered rewrite of the OpenShift AI 2.25.10 (and later) → 3.5 migration guide, targeting the GA **3.5** release. Where the reference documentation is organized by *component* (with each component split across a "before upgrade" and an "after upgrade" chapter), this guide is organized by *phase in time* — the actual order a cluster administrator performs the work. Every step from the component-organized guide is preserved; it has simply been re-filed into the phase where you do it.
+> **About this guide.** This is a task-ordered rewrite of the OpenShift AI 2.25.10 (and later versions of 2.25) → 3.5 migration guide, targeting the GA **3.5** release. Where the reference documentation is organized by *component* (with each component split across a "before upgrade" and an "after upgrade" chapter), this guide is organized by *phase in time* — the actual order a cluster administrator performs the work. Every step from the component-organized guide is preserved; it has simply been re-filed into the phase where you do it.
 >
 > The single most important idea in this guide is **sequencing**: you migrate a workload *off* a component before you remove the component. Get the order wrong and you lose a running workload with no automated way back.
 
