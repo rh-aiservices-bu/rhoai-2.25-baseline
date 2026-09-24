@@ -22,6 +22,10 @@ rules:
   - apiGroups: ["operators.coreos.com"]
     resources: ["installplans"]
     verbs: ["get", "list", "watch", "patch", "update"]
+  # The Job reconciles until TARGET_CSV reports Succeeded, so it must read CSVs.
+  - apiGroups: ["operators.coreos.com"]
+    resources: ["clusterserviceversions"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -60,29 +64,46 @@ spec:
             - -c
             - |
               set -euo pipefail
-              # Wait up to 10 minutes for the InstallPlan targeting TARGET_CSV
-              # to appear (OLM creates it after ArgoCD applies the Subscription).
-              for _ in $(seq 1 60); do
-                plans=$(oc get installplan -n openshift-operators -o name 2>/dev/null || true)
-                if [[ -n "$plans" ]]; then
-                  break
+              # Reconcile until TARGET_CSV is actually installed, rather than
+              # making a single pass. OLM creates the InstallPlan object a moment
+              # before it populates spec.approved, so a one-shot pass that breaks
+              # as soon as an InstallPlan *exists* can match nothing, print
+              # "done", and exit 0 having approved nothing — and because it exited
+              # 0, restartPolicy/backoffLimit never retry it. Looping until the
+              # CSV reports Succeeded closes that race; exiting non-zero on
+              # timeout lets backoffLimit retry instead of failing silently.
+              deadline=$(( SECONDS + 900 ))
+              while (( SECONDS < deadline )); do
+                phase=$(oc get csv -n openshift-operators "$TARGET_CSV" \
+                  -o jsonpath='{.status.phase}' 2>/dev/null || true)
+                if [[ "$phase" == "Succeeded" ]]; then
+                  echo "CSV ${TARGET_CSV} is Succeeded — nothing left to approve"
+                  exit 0
                 fi
+
+                # Approve a plan only when EVERY CSV it would install is the
+                # pinned target. A "contains TARGET_CSV" test is not enough: a
+                # plan listing both the old and the new CSV would pass it. Any
+                # other pending plan (v1.3.x/v1.4.x upgrades, which drop the
+                # authorino.kuadrant.io/v1beta2 that RHOAI 2.25.x needs, or plans
+                # for the unrelated Automatic operators that share this namespace)
+                # is deliberately left alone.
+                for plan in $(oc get installplan -n openshift-operators \
+                    -o jsonpath='{range .items[?(@.spec.approved==false)]}{.metadata.name}{"\n"}{end}'); do
+                  csvs=$(oc get installplan -n openshift-operators "$plan" \
+                    -o jsonpath='{range .spec.clusterServiceVersionNames[*]}{@}{"\n"}{end}' | sed '/^$/d')
+                  unexpected=$(grep -vx "$TARGET_CSV" <<<"$csvs" || true)
+                  if [[ -n "$csvs" && -z "$unexpected" ]]; then
+                    echo "approving InstallPlan/${plan} (${TARGET_CSV})"
+                    oc patch installplan -n openshift-operators "$plan" \
+                      --type=merge -p '{"spec":{"approved":true}}'
+                  else
+                    echo "leaving InstallPlan/${plan} unapproved (CSVs: $(tr '\n' ' ' <<<"$csvs")) — pinned to ${TARGET_CSV}"
+                  fi
+                done
                 sleep 10
               done
-              # Approve only plans whose spec.clusterServiceVersionNames array
-              # contains TARGET_CSV exactly. Any other pending plan (including
-              # upgrade plans for v1.3.x/v1.4.x, or plans for unrelated operators)
-              # is left alone.
-              for plan in $(oc get installplan -n openshift-operators \
-                  -o jsonpath='{range .items[?(@.spec.approved==false)]}{.metadata.name}{"\n"}{end}'); do
-                csvs=$(oc get installplan -n openshift-operators "$plan" \
-                  -o jsonpath='{.spec.clusterServiceVersionNames}')
-                if [[ "$csvs" == *"$TARGET_CSV"* ]]; then
-                  echo "approving InstallPlan/${plan} (CSVs: ${csvs})"
-                  oc patch installplan -n openshift-operators "$plan" \
-                    --type=merge -p '{"spec":{"approved":true}}'
-                else
-                  echo "skipping InstallPlan/${plan} (CSVs: ${csvs} — not ${TARGET_CSV})"
-                fi
-              done
-              echo "done"
+
+              echo "ERROR: ${TARGET_CSV} did not reach Succeeded within 15m" >&2
+              oc get installplan -n openshift-operators >&2 || true
+              exit 1

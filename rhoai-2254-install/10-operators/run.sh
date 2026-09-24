@@ -55,8 +55,11 @@ fi
 apply_manifest "${SCRIPT_DIR}/rhoai-operator.yaml"
 # Subscription uses installPlanApproval=Manual with startingCSV=rhods-operator.2.25.10.
 # Approve the initial install plan so 2.25.10 actually installs; future upgrade plans
-# will still require manual approval and will be ignored (keeping us pinned at 2.25.10).
-approve_installplan redhat-ods-operator 600
+# are left unapproved, keeping us pinned at 2.25.10.
+# Filter on the FULLY-QUALIFIED pinned CSV, for the same reason as Authorino above:
+# unfiltered, this approves whichever plan is pending first, so a re-run after 2.25.10
+# is installed would approve the 2.25.11 z-stream plan and silently break the pin.
+approve_installplan redhat-ods-operator 600 rhods-operator.2.25.10
 wait_for_csv_succeeded redhat-ods-operator rhods-operator.2.25.10 1200
 
 # Wait for the DSCI/DSC CRDs the operator installs before phase 20 tries to use them.

@@ -26,9 +26,9 @@ gitops/
 The Applications under `apps/` point back at the **existing** phase directories
 (`10-operators/`, `20-dsc/`, `30-samples/<sample>/`). Argo CD's directory source
 ignores the `run.sh` files and only applies the YAMLs. The two cases where the
-bash path does something beyond `oc apply` are handled by post-sync hook Jobs:
+bash path does something beyond `oc apply` are handled by helper Jobs:
 
-- **RHOAI InstallPlan approval** ([hooks/approve-installplan.yaml](hooks/approve-installplan.yaml)) — the RHOAI Subscription uses `installPlanApproval=Manual` to pin `rhods-operator.2.25.10`. Argo CD won't approve InstallPlans, so a PostSync Job approves any pending InstallPlan in `redhat-ods-operator`. Idempotent and safe to re-run.
+- **RHOAI InstallPlan approval** ([hooks/approve-installplan.yaml](hooks/approve-installplan.yaml)) — the RHOAI Subscription uses `installPlanApproval=Manual` to pin `rhods-operator.2.25.10`. Argo CD won't approve InstallPlans, so a Job approves the pinned one. It reconciles until the 2.25.10 CSV reports `Succeeded`, and approves a plan **only when every CSV that plan would install is exactly `rhods-operator.2.25.10`** — so the z-stream upgrade plan OLM offers afterwards (2.25.11 at the current channel head) is deliberately left unapproved. Idempotent and safe to re-run.
 - **ModelMesh controller rollout** ([hooks/rollout-modelmesh-controller.yaml](hooks/rollout-modelmesh-controller.yaml)) — the ModelMesh sample applies a `model-serving-config` ConfigMap that the controller only reads at startup. A PostSync Job restarts the deployment so `allowAnyPVC=true` + `podsPerRuntime=1` take effect.
 
 ## Sync waves
@@ -39,7 +39,8 @@ Argo CD applies child Applications in order of `argocd.argoproj.io/sync-wave`:
 | ---: | :------------------------------------------------------------------------ |
 |  -5  | namespaces (istio-system, knative-serving, openshift-serverless, redhat-ods-operator) |
 |   0  | Service Mesh v2, Serverless, standalone Authorino Subscriptions           |
-|   5  | RHOAI Subscription + InstallPlan-approval PostSync Job                    |
+|   5  | RHOAI Subscription                                                        |
+|   6  | InstallPlan-approval Job (own Application, not a PostSync hook — see below) |
 |  10  | DSCInitialization + DataScienceCluster                                    |
 |  20  | All sample workloads (workbenches, kserve-*, ray, kfto, trustyai, …)      |
 
@@ -156,11 +157,19 @@ directories (copy the Application YAMLs directly into each overlay) so no
 
 ## Limitations
 
-- **InstallPlan pinning.** The RHOAI Subscription stays Manual approval, but the
-  approval Job approves *every* pending InstallPlan in `redhat-ods-operator`, so a
-  future upgrade plan would also get auto-approved if you re-sync after the
-  operator's channel head moves. That's fine for a lab install and matches what
-  the bash path does, but it's not the production pinning behavior.
+- **The pin leaves a permanently pending InstallPlan.** Because the approval Job
+  only ever approves `rhods-operator.2.25.10`, OLM keeps offering the next
+  z-stream (2.25.11 today) and the Subscription sits on
+  `InstallPlanPending / RequiresApproval` indefinitely. `oc get sub rhods-operator
+  -n redhat-ods-operator` reporting `UpgradePending` is therefore the **expected**
+  steady state, not a fault. Argo CD's built-in Subscription health check would
+  call that `Progressing` forever and stall the app-of-apps at wave 5, so the
+  ArgoCD CR ships a `resourceHealthChecks` override
+  ([bootstrap/15-argocd-config.yaml](bootstrap/15-argocd-config.yaml)) that treats
+  a deliberately-unapproved plan as Healthy while still reporting `Degraded` for
+  `CatalogSourcesUnhealthy`, `InstallPlanMissing`, `InstallPlanFailed` and
+  `ResolutionFailed`. To intentionally move off the pin, bump `startingCSV` in
+  `10-operators/rhoai-operator.yaml` and `TARGET_CSV` in the approval Job together.
 - **No GPU phase yet.** The `05-gpu/` install isn't exposed as a GitOps overlay —
   the bash path skips it by default (`INSTALL_GPU=0`) and the lab samples are
   CPU-only. Add a `05-gpu` Application + an `all-gpu` overlay if you need it.
