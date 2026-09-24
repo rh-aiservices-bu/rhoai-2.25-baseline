@@ -26,6 +26,10 @@ rules:
   - apiGroups: ["operators.coreos.com"]
     resources: ["installplans"]
     verbs: ["get", "list", "watch", "patch", "update"]
+  # The Job reconciles until TARGET_CSV reports Succeeded, so it must read CSVs.
+  - apiGroups: ["operators.coreos.com"]
+    resources: ["clusterserviceversions"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -56,25 +60,64 @@ spec:
       containers:
         - name: approve
           image: registry.redhat.io/openshift4/ose-cli:latest
+          env:
+            - name: NAMESPACE
+              value: "redhat-ods-operator"
+            # The only CSV this Job will ever approve. Keep in step with
+            # startingCSV in 10-operators/rhoai-operator.yaml.
+            - name: TARGET_CSV
+              value: "rhods-operator.2.25.10"
           command:
             - /bin/bash
             - -c
             - |
               set -euo pipefail
-              # Wait until at least one InstallPlan exists, then approve any that
-              # are still spec.approved=false. Loop bounded so the Job eventually
-              # exits even if no InstallPlan ever appears (e.g. Subscription failed).
-              for _ in $(seq 1 60); do
-                plans=$(oc get installplan -n redhat-ods-operator -o name 2>/dev/null || true)
-                if [[ -n "$plans" ]]; then
-                  break
+              # Reconcile until TARGET_CSV is actually installed, rather than
+              # making a single pass. Two reasons a one-shot pass is not enough:
+              #
+              #  1. Race. OLM creates the InstallPlan object a moment before it
+              #     populates spec.approved. A single pass that breaks as soon as
+              #     an InstallPlan *exists* can then match nothing, print "done",
+              #     and exit 0 having approved nothing — and because it exited 0,
+              #     restartPolicy/backoffLimit never retry it.
+              #  2. Ordering. Any later InstallPlan (notably the 2.25.11 z-stream
+              #     upgrade OLM offers once 2.25.10 reaches Succeeded) is created
+              #     long after a one-shot Job has exited and its TTL removed it.
+              #
+              # Looping until the CSV reports Succeeded closes the race, and
+              # exiting non-zero on timeout lets backoffLimit retry instead of
+              # failing silently.
+              deadline=$(( SECONDS + 900 ))
+              while (( SECONDS < deadline )); do
+                phase=$(oc get csv -n "$NAMESPACE" "$TARGET_CSV" \
+                  -o jsonpath='{.status.phase}' 2>/dev/null || true)
+                if [[ "$phase" == "Succeeded" ]]; then
+                  echo "CSV ${TARGET_CSV} is Succeeded — nothing left to approve"
+                  exit 0
                 fi
+
+                # Approve a plan only when EVERY CSV it would install is the
+                # pinned target. A "contains TARGET_CSV" test is not enough: a
+                # plan listing both the old and the new CSV would pass it and
+                # roll us straight off the pin. Requiring the whole list to be
+                # exactly TARGET_CSV is what keeps this baseline at 2.25.10
+                # instead of advancing to the channel head.
+                for plan in $(oc get installplan -n "$NAMESPACE" \
+                    -o jsonpath='{range .items[?(@.spec.approved==false)]}{.metadata.name}{"\n"}{end}'); do
+                  csvs=$(oc get installplan -n "$NAMESPACE" "$plan" \
+                    -o jsonpath='{range .spec.clusterServiceVersionNames[*]}{@}{"\n"}{end}' | sed '/^$/d')
+                  unexpected=$(grep -vx "$TARGET_CSV" <<<"$csvs" || true)
+                  if [[ -n "$csvs" && -z "$unexpected" ]]; then
+                    echo "approving InstallPlan/${plan} (${TARGET_CSV})"
+                    oc patch installplan -n "$NAMESPACE" "$plan" \
+                      --type=merge -p '{"spec":{"approved":true}}'
+                  else
+                    echo "leaving InstallPlan/${plan} unapproved (CSVs: $(tr '\n' ' ' <<<"$csvs")) — pinned to ${TARGET_CSV}"
+                  fi
+                done
                 sleep 10
               done
-              for plan in $(oc get installplan -n redhat-ods-operator \
-                  -o jsonpath='{range .items[?(@.spec.approved==false)]}{.metadata.name}{"\n"}{end}'); do
-                echo "approving InstallPlan/${plan}"
-                oc patch installplan -n redhat-ods-operator "$plan" \
-                  --type=merge -p '{"spec":{"approved":true}}'
-              done
-              echo "done"
+
+              echo "ERROR: ${TARGET_CSV} did not reach Succeeded within 15m" >&2
+              oc get installplan -n "$NAMESPACE" >&2 || true
+              exit 1
