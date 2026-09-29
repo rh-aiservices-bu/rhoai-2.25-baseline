@@ -55,7 +55,16 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: approve
-          image: registry.redhat.io/openshift4/ose-cli:latest
+          # Pull `oc` from the cluster's own release payload via the internal
+          # registry, not registry.redhat.io/openshift4/ose-cli:latest — that
+          # repo publishes no `latest` tag, so the pull fails with "This
+          # repository does not use the 'latest' tag" and the Job never starts
+          # (ImagePullBackOff), silently leaving the InstallPlan unapproved.
+          # The openshift/cli ImageStream is always present, always matches the
+          # cluster's OCP version, and needs no registry entitlement. If the
+          # internal registry is disabled, substitute an explicit external tag
+          # such as registry.redhat.io/openshift4/ose-cli:v4.21.
+          image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
           env:
             - name: TARGET_CSV
               value: "authorino-operator.v1.2.4"
@@ -72,6 +81,9 @@ spec:
               # 0, restartPolicy/backoffLimit never retry it. Looping until the
               # CSV reports Succeeded closes that race; exiting non-zero on
               # timeout lets backoffLimit retry instead of failing silently.
+              # Package name, e.g. authorino-operator — used to spot a plan that
+              # would move THIS operator to a version other than the pin.
+              PKG="${TARGET_CSV%%.*}"
               deadline=$(( SECONDS + 900 ))
               while (( SECONDS < deadline )); do
                 phase=$(oc get csv -n openshift-operators "$TARGET_CSV" \
@@ -81,25 +93,36 @@ spec:
                   exit 0
                 fi
 
-                # Approve a plan only when EVERY CSV it would install is the
-                # pinned target. A "contains TARGET_CSV" test is not enough: a
-                # plan listing both the old and the new CSV would pass it. Any
-                # other pending plan (v1.3.x/v1.4.x upgrades, which drop the
-                # authorino.kuadrant.io/v1beta2 that RHOAI 2.25.x needs, or plans
-                # for the unrelated Automatic operators that share this namespace)
-                # is deliberately left alone.
+                # Approve a plan only if it installs the pinned CSV and does not
+                # ALSO carry a different version of this same operator.
+                #
+                # Co-resolved CSVs from *other* packages must be allowed. OLM
+                # batches everything it resolves in a namespace into a single
+                # InstallPlan, and openshift-operators hosts several Automatic
+                # Subscriptions, so the pinned Authorino plan legitimately
+                # arrives bundled with them — observed on a fresh cluster:
+                #   kiali-operator.v2.27.4,servicemeshoperator.v2.6.17,authorino-operator.v1.2.4
+                # Demanding that every CSV equal TARGET_CSV would reject that
+                # forever and leave Authorino uninstalled. What must never be
+                # approved is a plan carrying another version of THIS operator —
+                # v1.3.x/v1.4.x drop the authorino.kuadrant.io/v1beta2 API that
+                # RHOAI 2.25.x odh-model-controller hardcodes.
                 for plan in $(oc get installplan -n openshift-operators \
                     -o jsonpath='{range .items[?(@.spec.approved==false)]}{.metadata.name}{"\n"}{end}'); do
                   csvs=$(oc get installplan -n openshift-operators "$plan" \
                     -o jsonpath='{range .spec.clusterServiceVersionNames[*]}{@}{"\n"}{end}' | sed '/^$/d')
-                  unexpected=$(grep -vx "$TARGET_CSV" <<<"$csvs" || true)
-                  if [[ -n "$csvs" && -z "$unexpected" ]]; then
-                    echo "approving InstallPlan/${plan} (${TARGET_CSV})"
-                    oc patch installplan -n openshift-operators "$plan" \
-                      --type=merge -p '{"spec":{"approved":true}}'
-                  else
-                    echo "leaving InstallPlan/${plan} unapproved (CSVs: $(tr '\n' ' ' <<<"$csvs")) — pinned to ${TARGET_CSV}"
+                  if ! grep -qx "$TARGET_CSV" <<<"$csvs"; then
+                    echo "leaving InstallPlan/${plan} unapproved (CSVs: $(tr '\n' ' ' <<<"$csvs")) — does not install ${TARGET_CSV}"
+                    continue
                   fi
+                  drift=$(grep "^${PKG}\." <<<"$csvs" | grep -vx "$TARGET_CSV" || true)
+                  if [[ -n "$drift" ]]; then
+                    echo "leaving InstallPlan/${plan} unapproved — would also move ${PKG} to: $(tr '\n' ' ' <<<"$drift")"
+                    continue
+                  fi
+                  echo "approving InstallPlan/${plan} (CSVs: $(tr '\n' ' ' <<<"$csvs"))"
+                  oc patch installplan -n openshift-operators "$plan" \
+                    --type=merge -p '{"spec":{"approved":true}}'
                 done
                 sleep 10
               done
