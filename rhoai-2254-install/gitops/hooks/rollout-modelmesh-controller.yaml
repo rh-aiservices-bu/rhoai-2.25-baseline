@@ -52,7 +52,16 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: rollout
-          image: registry.redhat.io/openshift4/ose-cli:latest
+          # Pull `oc` from the cluster's own release payload via the internal
+          # registry, not registry.redhat.io/openshift4/ose-cli:latest — that
+          # repo publishes no `latest` tag, so the pull fails with "This
+          # repository does not use the 'latest' tag" and the Job never starts
+          # (ImagePullBackOff), silently leaving the InstallPlan unapproved.
+          # The openshift/cli ImageStream is always present, always matches the
+          # cluster's OCP version, and needs no registry entitlement. If the
+          # internal registry is disabled, substitute an explicit external tag
+          # such as registry.redhat.io/openshift4/ose-cli:v4.21.
+          image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
           command:
             - /bin/bash
             - -c
