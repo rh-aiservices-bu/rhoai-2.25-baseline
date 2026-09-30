@@ -68,6 +68,25 @@ Red Hat ships an assessment tool, `rhai-cli`, that inspects the cluster and repo
 
 The assessment also surfaces **additions**, not just removals: a finding like `llamastack / config` is a 3.x prerequisite that does not exist yet, and must be resolved before the upgrade.
 
+> ### ⚠️ `rhai-cli lint` does not block the upgrade — the DSC gate does
+>
+> The lint is **advisory**. It has no hook into OLM, so a failing assessment will not stop you switching channel and approving the InstallPlan. Verified on a 2.25.10 cluster with every pre-migration step deliberately skipped: OLM walked **2.25.10 → 2.25.11 → 3.5.1**, approved all three InstallPlans, and the CSV reached `Succeeded` with the Subscription `AtLatestKnown`. Nothing intervened.
+>
+> Enforcement happens one layer down instead. The 3.x operator installs normally, then **refuses to reconcile the DataScienceCluster** until a set of *upgrade gates* is satisfied:
+>
+> ```
+> Ready=False  [AdminAckRequired]  Waiting for upgrade gates to be acknowledged
+> ```
+>
+> This is a genuine safety net — on that test cluster every workload stayed in its pre-upgrade shape (both Serverless ISVCs, the ModelMesh ISVC, 2 RayClusters, 4 workbenches, KnativeServing and the SMCP all still present and serving), because the operator never got far enough to convert or remove anything. The platform is *held*, not half-migrated.
+>
+> But do not treat the gate as a substitute for the assessment:
+>
+> - It fires **after** you have upgraded, when rollback is no longer supported (Phase 1). The lint fires while you can still act.
+> - The gates are **admin acknowledgements, not verifications** — see the warning in 8.1. Setting one to `true` is taken at face value.
+>
+> Run the lint, clear it, *then* upgrade. Full details of the gate and how to read it: **8.1**.
+
 ## 0.4 Roles and permissions
 
 The migration requires coordination across roles:
@@ -506,6 +525,8 @@ The output columns are **`STATUS | KIND | GROUP | CHECK | IMPACT | MESSAGE`** (n
 | `2` | Warning-only findings (expected — not a tool error). |
 
 **Before upgrading, ensure no `prohibited` or `critical` items remain.** After you resolve each blocker in the phases that follow, re-run `lint` to confirm it cleared. Expect the critical count to fall as you progress — and note that resolving one item can surface new ones (e.g. 3.x prerequisites that don't exist yet).
+
+> Nothing enforces this. `lint` cannot stop an upgrade (see 0.3) — its exit code is for *you*. The same conditions are re-checked after the upgrade as DSC **upgrade gates** (8.1), but by then rollback is no longer supported. A clean lint here is what keeps you from meeting those gates at all.
 
 ## 3.4 Submit the assessment output to Red Hat
 
@@ -1660,6 +1681,8 @@ Check the subscription's condition to recognize this case before restarting: `oc
 oc get dsc <name> -o jsonpath='{.status.conditions}' | jq
 ```
 
+If the reason is **`AdminAckRequired`** (*"Waiting for upgrade gates to be acknowledged"*), the operator is fine and is deliberately holding the DSC because pre-migration work is outstanding. Do not debug components — read the outstanding gates and work through them. See the upgrade-gates callout in **8.1**.
+
 Phase 8 covers verifying the platform and Gateway.
 
 ---
@@ -1687,6 +1710,60 @@ oc get gateway data-science-gateway -n openshift-ingress -o custom-columns='NAME
 The **Data Science Gateway must be `Programmed=True`** — the dashboard, model endpoints, and ModelRegistry all resolve through it. If it is not, work through the Service Mesh 2 leftover-CRD recovery below **before** verifying any component.
 
 Then click the **Red Hat OpenShift AI** link in the OpenShift console and confirm the dashboard loads.
+
+> ### ⚠️ DSC `Not Ready` with `AdminAckRequired` — the upgrade gates
+>
+> If the DSC reports this, the operator is healthy and is *deliberately* refusing to reconcile:
+>
+> ```
+> Ready=False  [AdminAckRequired]  Waiting for upgrade gates to be acknowledged
+> ```
+>
+> It means pre-migration work is outstanding. Nothing has been migrated and nothing is broken — the platform is held in its pre-upgrade state until the gates clear. **See it with:**
+>
+> ```bash
+> # 1. Confirm this is the gate, not some other failure
+> oc get dsc default-dsc \
+>   -o jsonpath='{range .status.conditions[?(@.reason=="AdminAckRequired")]}{.type}={.status}  {.message}{"\n"}{end}'
+>
+> # 2. List only the gates that are still blocking (a satisfied gate reads "true";
+> #    an unsatisfied one carries the reason)
+> oc get cm odh-upgrade-acks -n redhat-ods-operator \
+>   -o go-template='{{range $k,$v := .data}}{{if ne $v "true"}}{{$k}}{{"\n    "}}{{$v}}{{"\n\n"}}{{end}}{{end}}'
+>
+> # 3. Progress counter
+> oc get cm odh-upgrade-acks -n redhat-ods-operator -o json \
+>   | jq -r '.data | "satisfied: \([.[]|select(.=="true")]|length)/\(length)"'
+> ```
+>
+> The gates live in the **`odh-upgrade-acks`** ConfigMap in `redhat-ods-operator` (21 keys in 3.5.1). Each unsatisfied gate maps onto a phase of this guide:
+>
+> | Gate | Example message | Fix in |
+> |------|-----------------|--------|
+> | `ack-3.5-kserve` | `kserve blocking workloads found: 2 Serverless InferenceServices, 1 ModelMesh InferenceServices, 1 multi-model ServingRuntimes` | Phase 4 |
+> | `ack-3.5-dependencies-kueue-operator` | `Kueue managementState Managed is not supported` | 5.7 |
+> | `ack-3.5-removed-codeflare` | `CodeFlare internal CR present` | 5.1 / 5.7 |
+> | `ack-3.5-removed-modelmeshserving` | `ModelMeshServing internal CR present` | 5.7 |
+> | `ack-3.5-dependencies-servicemeshoperatorv2` | `Service Mesh Operator v2 subscription … is still installed` | 5.8 / 5.9 |
+> | `ack-3.5-ray` | `2 CodeFlare-managed RayClusters still require pre-upgrade backup acknowledgement` | 5.1 |
+> | `ack-3.5-trustyai` | `1 TrustyAIService instances using PVC storage require pre-upgrade backup` | 5.2 |
+>
+> **Clear a gate by doing the work it names**, then let the operator re-evaluate. Because these are the same conditions `rhai-cli lint` reports pre-upgrade, a cluster that passed a clean assessment should arrive here with all gates already `true` and never see this message.
+>
+> #### These are acknowledgements, not verifications
+>
+> A gate can also be written directly:
+>
+> ```bash
+> oc patch cm odh-upgrade-acks -n redhat-ods-operator --type=merge \
+>   -p '{"data":{"ack-3.5-ray":"true"}}'
+> ```
+>
+> **The operator accepts that and does not re-derive it** — verified on a test cluster: a forced `true` survived repeated reconciles over several minutes and moved the satisfied count from 14/21 to 15/21, with the underlying RayClusters untouched and unbacked-up.
+>
+> So an administrator can clear every gate by hand and release the DSC **without having performed any of the migration** — Serverless ISVCs unconverted, Service Mesh still installed, no Ray or TrustyAI backups taken. The DSC would then reconcile against exactly the state the gates exist to prevent.
+>
+> Treat the gate as a **reminder, not a safety net**. Only acknowledge a gate when you have genuinely done the work — and never as a way to get an upgrade moving, because by this point rollback is no longer supported (Phase 1).
 
 > **What the operator handles automatically.** Several tasks that were manual admin steps in earlier releases are now done by the 3.5 operator on startup — do **not** attempt them by hand:
 > - **HardwareProfile migration** — AcceleratorProfiles are converted to HardwareProfiles and Notebooks/InferenceServices are annotated (create-only; your customizations are preserved).
@@ -1989,7 +2066,7 @@ rhai-cli lint --target-version 3.5 | grep -E 'Total:|FAIL|PASS|WARNING|PROHIBITE
 
 `Failed: 0` means the platform-side migration is clean. Warnings are acceptable.
 
-> **Note.** `lint` is a pre-upgrade gate: on a cluster already at 3.5 it exits as a no-op (*"Current and target versions are the same (3.5), no checks will be executed."*). Your post-upgrade confidence comes from the per-component verifications in 8.1–8.8 and the Phase 9 workload re-tests, not from re-running lint.
+> **Note.** `lint` is pre-upgrade only: on a cluster already at 3.5 it exits as a no-op (*"Current and target versions are the same (3.5), no checks will be executed."*). Your post-upgrade confidence comes from the per-component verifications in 8.1–8.8 and the Phase 9 workload re-tests, not from re-running lint.
 
 ## Troubleshooting
 
