@@ -36,8 +36,8 @@ Previous OpenShift AI version bumps were routine operator upgrades. The move to 
 
 - **Components are removed.** KServe Serverless mode, ModelMesh Serving, and CodeFlare are all gone in 3.5. The embedded Kueue is replaced by the external Red Hat build of Kueue (RHBOK), and the embedded Service Mesh dependency is dropped. You cannot simply disable these — any workload running on them must be migrated *off first*, or it stops serving.
 - **Components are renamed.** Llama Stack is rebranded as **OGX (Open GenAI Stack)**: the `LlamaStackDistribution` CR is replaced by `OGXServer` (v1beta1). And `RawDeployment` model serving is displayed as **`Standard`** in 3.5.
-- **Routing changes.** OpenShift Routes are replaced by the Kubernetes Gateway API. Model endpoint URLs and the dashboard URL change. Capture the new URLs and notify downstream consumers.
-- **Authentication changes.** The `oauth-proxy` sidecar is replaced by `kube-rbac-proxy`. Workbenches built for 2.x must be patched, and custom images rebuilt.
+- **Routing changes — the dashboard and workbenches, not Standard models.** The dashboard and workbenches move to the Kubernetes Gateway API: workbench URLs become path-based (`https://<gateway-host>/notebook/<ns>/<name>/`) and their 2.x Routes are deleted, so bookmarks break. **An ISVC that is already RawDeployment keeps its Route and its URL unchanged** — measured in 9.1a. Serverless ISVCs are the ones whose endpoints move, because the Knative ingress they relied on is removed. Capture new URLs for the dashboard and workbenches; do not tell downstream consumers that model endpoints changed before checking.
+- **Authentication changes — workbenches only.** Workbench pods move from the `oauth-proxy` sidecar to `kube-rbac-proxy`; 2.x workbenches must be patched (8.3) and custom images rebuilt (6.2). **Model serving does not make this move:** a Standard/RawDeployment ISVC with auth enabled still runs an `oauth-proxy` sidecar on 3.5, and the KServe controller actively maintains it. See 9.1a.
 - **Schema changes.** HardwareProfiles move to a new API group with renamed objects, and the DSC/DSCI move from v1 to v2 API (the operator converts them automatically on startup).
 
 Because so much changes at once, **there is no automated rollback**. OpenShift and OpenShift AI do not support rollbacks once you initiate an in-place migration. The only way back is restoring from a verified backup (Phase 1).
@@ -106,6 +106,29 @@ Before you begin, open a proactive support case through the Red Hat Customer Por
 > **Phase 1 of 10 · Prepare** — Meet the prerequisites and take the backup that is your only rollback path. **Next:** Phase 2 — Baseline the workloads.
 
 Complete these checks and preparations before you touch any workload.
+
+> ### ⚠️ If the cluster is GitOps-managed, stop the reconciler before you start
+>
+> Argo CD (or any GitOps controller) holding your OpenShift AI resources will **revert the migration as you make it** — converted InferenceServices, flipped ServingRuntimes and DSC component states all get restored to their Git state, usually within seconds, and usually silently.
+>
+> Two steps, both needed:
+>
+> ```bash
+> # 1. Turn off automated sync on every Application that owns RHOAI resources
+> for a in $(oc get applications.argoproj.io -n openshift-gitops -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'); do
+>   oc patch application.argoproj.io "$a" -n openshift-gitops --type=merge \
+>     -p '{"spec":{"syncPolicy":{"automated":null}}}'
+> done
+>
+> # 2. Terminate any sync still in flight — disabling automated sync does NOT cancel one
+> oc get applications.argoproj.io -n openshift-gitops -o json \
+>   | jq -r '.items[] | select(.operation != null) | .metadata.name' \
+>   | while read -r a; do oc patch application.argoproj.io "$a" -n openshift-gitops --type=merge -p '{"operation":null}'; done
+> ```
+>
+> Step 2 is the one people miss. A retrying operation keeps re-applying Git state long after automated sync is off — observed reverting a converted ServingRuntime back to `multiModel: true` twice, minutes apart, on an Application already showing `automated: none`. Confirm with `oc get applications.argoproj.io -A -o json | jq -r '.items[] | select(.operation != null) | .metadata.name'` returning nothing.
+>
+> Re-enable GitOps only after the migration is verified, and update the Git source first so it reflects the 3.x state — otherwise the next sync reverts the migration.
 
 > **Run the shell snippets in this guide with `bash`.** They assume bash word-splitting. Under `zsh` (the macOS default) an unquoted `for c in $VAR; do …` iterates **once with the whole string** instead of per item — which silently defeats the Istio-CR safety check in Phase 8.1, among others. Either start a `bash` shell first, or wrap multi-line blocks as `bash -c '…'`. (`for x in $(cmd)` is fine in both shells.)
 
@@ -1596,7 +1619,7 @@ EOF
 Wait for the CSV `jobset-operator.v1.0.0` to reach `Succeeded`, then create the `JobSetOperator` operand CR named `cluster`. **Confirm the operand CRD's exact group/version first** — it can differ between operator builds, so read it off the installed CRD rather than trusting the example:
 
 ```
-oc get csv -n jobset-system | grep jobset-operator.v1.0.0
+oc get csv -n jobset-system | grep jobset-operator   # v1.0.0 or later, e.g. v1.0.1
 
 # discover the operand CRD and its served apiVersion (group/version)
 oc get crd | grep -i jobsetoperator
@@ -2052,7 +2075,7 @@ Model-serving troubleshooting matrix:
 | `READY: True` but all calls return **HTTP 503** | A Serverless ISVC wasn't converted before upgrade | Convert to `Standard` deployment mode post-upgrade per [KB 7134025](https://access.redhat.com/articles/7134025) |
 | Healthy ISVC but requests 503 with "Application Not Available" | A ModelMesh ISVC wasn't converted | Convert per [KB 7134025](https://access.redhat.com/articles/7134025) |
 | `KnativeServing` still `Ready`, idle pods in `knative-serving` | Serverless Operator not removed | No functional impact; uninstall the operator and `oc delete namespace knative-serving` |
-| Standalone Authorino still `Ready` | Authorino not removed | No impact for ISVCs (they use kube-rbac-proxy); **breaks LLMInferenceService** — uninstall and use RHCL |
+| Standalone Authorino still `Ready` | Authorino not removed | No impact for ISVCs (their auth is the per-pod `oauth-proxy` sidecar, which does not use Authorino — see 9.1a); **breaks LLMInferenceService** — uninstall and use RHCL |
 | Gateway API resources don't work | OSSM v2 not removed; or leftover SM2 `*.istio.io` CRDs block the sail controller | Uninstall OSSM v2; if the operator is already gone but `istiod-openshift-gateway` is 0/1, delete the stale `*.istio.io` CRDs and restart the ingress-operator (see 8.1) |
 | Dashboard shows runtimes **Outdated** | Runtime templates advanced | Redeploy workloads on the latest global serving runtime templates |
 
@@ -2115,6 +2138,53 @@ done
 # Every ISVC Ready=True
 oc get isvc -A -o json | jq -r '[.items[] | select(.status.conditions[]? | select(.type=="Ready" and .status=="True"))] | length'
 ```
+
+## 9.1a What does and does not change for a Standard (RawDeployment) model
+
+Two questions come up constantly, and the honest answers are narrower than "3.x changes routing and auth" suggests. Both were measured on a real 2.25.10 → 3.5.1 migration of an externally-exposed, auth-enabled vLLM ISVC that was **already** `RawDeployment` before the upgrade, with a clean pre-upgrade assessment.
+
+### Nothing about the endpoint changes
+
+| Property | Before (2.25.10) | After (3.5.1) |
+|----------|------------------|---------------|
+| `deploymentMode` | `RawDeployment` | `Standard` *(display rename only)* |
+| ISVC `.status.url` | `https://<name>-<ns>.apps.<cluster>` | **identical** |
+| Route name / host | `<name>` / same host | **identical** |
+| Route target port | `https` | **identical** |
+| Route TLS termination / policy | `reencrypt` / `Redirect` | **identical** |
+| HTTPRoutes created for the ISVC | 0 | **0** |
+| `storageUri` | unchanged | unchanged |
+| Unauthenticated request | `HTTP 302` | **identical** |
+| Authenticated request + inference | served | **identical, same output** |
+
+**Why it survives.** For Standard/Raw the Route is created by the operator with an `ownerReference` back to the InferenceService and named after it. Nothing in the upgrade re-platforms that Route onto the Gateway. The Gateway API migration that *does* change URLs affects the **dashboard and workbenches** — those move to path-based Gateway URLs and their 2.x Routes are deleted.
+
+**Serverless is the mode whose endpoints move**, because the Knative ingress they depend on is removed. If a model was Serverless and you converted it in Phase 4, re-check its URL; if it was already Raw, expect no change.
+
+> **A Standard ISVC is only externally reachable if it carries the label `networking.kserve.io/visibility: exposed`.** That label is what makes the operator create the Route and set `.status.url` to the external host instead of `http://<name>-predictor.<ns>.svc.cluster.local`. The Knative label `networking.knative.dev/visibility: cluster-local` has no effect on a Raw deployment. Note also that `security.opendatahub.io/enable-auth=true` moves the Route from `edge`/`http1` to `reencrypt`/`https`, so TLS termination follows the auth setting.
+
+Verify on your own cluster rather than assuming:
+
+```bash
+NS=<namespace>; N=<isvc-name>
+oc get isvc "$N" -n "$NS" -o jsonpath='url={.status.url}{"\n"}mode={.status.deploymentMode}{"\n"}'
+oc get route "$N" -n "$NS" -o jsonpath='host={.spec.host}{"\n"}port={.spec.port.targetPort}{"\n"}tls={.spec.tls.termination}{"\n"}'
+oc get httproute -n "$NS"      # expect none for a Standard ISVC
+```
+
+### Model serving keeps `oauth-proxy` — it does **not** move to `kube-rbac-proxy`
+
+The `oauth-proxy` → `kube-rbac-proxy` change is a **workbench** change (6.2, 8.3). Model serving does not make it. On 3.5.1 an auth-enabled Standard ISVC still runs an `oauth-proxy` sidecar, and the KServe controller keeps it there:
+
+```bash
+oc get pod -n <ns> -l serving.kserve.io/inferenceservice=<name> \
+  -o jsonpath='{range .items[*]}{.metadata.name}: {range .spec.containers[*]}{.name} {end}{"\n"}{end}'
+# e.g. kserve-container oauth-proxy modelcar
+```
+
+**Do not try to force it.** Restarting the predictor does not help, and the attempt is misleading: `oc rollout restart` reports success, but the controller scales the new ReplicaSet back to `0` and keeps the original pod, because the Deployment's pod template still specifies `oauth-proxy` (`ose-oauth-proxy-rhel9`) and the Deployment is owned by the InferenceService. There is also no `modelserving` auth-model migrate action — `workbenches.patch-auth-model` exists for workbenches only.
+
+So a customer reporting *"the URL did not change but auth is still oauth-proxy"* after a supported migration is describing **expected behaviour on both counts**, not a missed step.
 
 ## 9.2 Reach each workbench through the Gateway
 
@@ -2198,7 +2268,7 @@ oc delete pvc backup-rhai-cli-0 -n rhai-migration
 
 Post-migration housekeeping:
 
-- Communicate the new **model endpoint URLs** and **dashboard URL** (Gateway API) to downstream consumers and users; the 2.x URLs no longer resolve.
+- Communicate the new **dashboard URL** and **workbench URLs** (Gateway API) to users; their 2.x URLs no longer resolve. **Check model endpoints before announcing a change** — a model that was already RawDeployment keeps its Route and URL (9.1a). Only models you converted from Serverless need their new endpoint published.
 - Update runbooks/documentation that reference the removed **Serverless** or **ModelMesh** deployment modes, and note that **`RawDeployment` is now displayed as `Standard`**.
 - If any 2.x serving operators (Serverless, Service Mesh 2, standalone Authorino) or the `knative-serving` namespace remain, remove them (see the 8.8 matrix).
 - Remove the **legacy Ray dashboard resources** left behind by `raycluster.migrate` (Phase 8.4). The old CodeFlare Routes now return HTTP 403 because the oauth-proxy ServiceAccounts they authenticated against were deleted during the migration:

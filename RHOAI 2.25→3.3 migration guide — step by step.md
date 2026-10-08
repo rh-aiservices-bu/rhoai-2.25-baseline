@@ -35,8 +35,8 @@ Red Hat OpenShift AI 3.3 is the first 3.x release line to support migration from
 Previous OpenShift AI version bumps were routine operator upgrades. The move to 3.x is different. In a single transition:
 
 - **Components are removed.** KServe Serverless mode, ModelMesh Serving, the embedded Kueue, and CodeFlare are all gone in 3.x. The embedded Service Mesh dependency is dropped. You cannot simply disable these — any workload running on them must be migrated *off first*, or it stops serving.
-- **Routing changes.** OpenShift Routes are replaced by the Kubernetes Gateway API. Model endpoint URLs and the dashboard URL change. Capture the new URLs and notify downstream consumers.
-- **Authentication changes.** The `oauth-proxy` sidecar is replaced by `kube-rbac-proxy`. Workbenches built for 2.x must be patched, and custom images rebuilt.
+- **Routing changes.** The dashboard and workbenches move to the Kubernetes Gateway API; workbench URLs become path-based and their 2.x Routes are deleted. Capture the new dashboard and workbench URLs. **Model endpoints are a separate question:** on 3.5 an ISVC that was already RawDeployment keeps its Route and URL unchanged, while Serverless endpoints do move. That was measured on a 2.25.10 → 3.5.1 migration and has **not** been re-verified against 3.3 — check your own cluster before telling downstream consumers their model URLs changed.
+- **Authentication changes.** Workbench pods move from the `oauth-proxy` sidecar to `kube-rbac-proxy`; 2.x workbenches must be patched and custom images rebuilt. **Model serving does not make this move on 3.5** — an auth-enabled RawDeployment ISVC still runs `oauth-proxy` there, maintained by the KServe controller. Not re-verified on 3.3; verify before assuming either way.
 - **Schema changes.** HardwareProfiles move to a new API group with renamed objects.
 
 Because so much changes at once, **there is no automated rollback**. OpenShift and OpenShift AI do not support rollbacks once you initiate an in-place migration. The only way back is restoring from a verified backup (Phase 1).
@@ -1629,7 +1629,7 @@ Model-serving troubleshooting matrix:
 | `READY: True` but all calls return **HTTP 503** | A Serverless ISVC wasn't converted before upgrade | Convert to RawDeployment post-upgrade per [KB 7134025](https://access.redhat.com/articles/7134025) |
 | Healthy ISVC but requests 503 with "Application Not Available" | A ModelMesh ISVC wasn't converted | Convert per [KB 7134025](https://access.redhat.com/articles/7134025) |
 | `KnativeServing` still `Ready`, idle pods in `knative-serving` | Serverless Operator not removed | No functional impact; uninstall the operator and `oc delete namespace knative-serving` |
-| Standalone Authorino still `Ready` | Authorino not removed | No impact for ISVCs (they use kube-rbac-proxy); **breaks LLMInferenceService** — uninstall and use RHCL |
+| Standalone Authorino still `Ready` | Authorino not removed | No impact for ISVCs (their auth is the per-pod `oauth-proxy` sidecar, which does not use Authorino — confirmed on 3.5, not re-verified on 3.3); **breaks LLMInferenceService** — uninstall and use RHCL |
 | Gateway API resources don't work | OSSM v2 not removed | Migrate dependents to Service Mesh v3, then uninstall OSSM v2 |
 | Dashboard shows runtimes **Outdated** | Runtime templates advanced | Redeploy workloads on the latest global serving runtime templates |
 
